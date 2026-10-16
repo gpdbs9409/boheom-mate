@@ -1,5 +1,6 @@
 """기능 2·3: 질문 → 관련 조항 검색 → 근거를 밝힌 답변 생성."""
 import json
+import threading
 from functools import lru_cache
 
 import chromadb
@@ -18,9 +19,17 @@ load_dotenv(ingest.BASE_DIR / ".env")
 _client = OpenAI()
 
 
+_db = None
+_db_lock = threading.Lock()
+
+
 def _collection():
-    db = chromadb.PersistentClient(path=str(ingest.DB_DIR))
-    return db.get_or_create_collection(
+    # 여러 방문자(스레드)가 동시에 PersistentClient를 새로 만들면 Chroma가 오류를 내므로 하나만 만들어 같이 쓴다
+    global _db
+    with _db_lock:
+        if _db is None:
+            _db = chromadb.PersistentClient(path=str(ingest.DB_DIR))
+    return _db.get_or_create_collection(
         ingest.COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
     )
 

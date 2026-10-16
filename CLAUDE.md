@@ -22,7 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | 항목 | 결정 |
 |---|---|
-| 저장 | (처음 결정한 "저장 안 함"에서 사용자 요청으로 변경) 사용자가 입력한 질문을 `question_store.py`로 SQLite 파일 `questions.db`에 저장하고, "질문 저장" 탭에 목록으로 보여준다. 새로고침해도 남는다. 로그인이 없어서 모든 방문자가 같은 목록을 본다 |
+| 저장 | (처음 결정한 "저장 안 함"에서 사용자 요청으로 변경) 사용자가 입력한 질문을 `question_store.py`로 SQLite 파일 `questions.db`에 저장하고, "질문 저장" 탭에 목록으로 보여준다. 로그인이 없어서 브라우저 세션별로 자기 질문만 본다(아래 "저장된 질문의 공개 범위") |
 | 사용 범위 | 링크 받은 사람도 사용 → OpenAI 사용 한도와 질문 횟수 제한 필요 |
 | 배포 | AWS EC2 (4주차). 대체안은 Streamlit Cloud. Streamlit은 Vercel에 배포 불가 |
 | 스택 | Python 3.11+, streamlit, openai(임베딩 + 답변), chromadb, pypdf, python-dotenv |
@@ -33,7 +33,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `ingest.py`: 기능 1. `data/`의 PDF를 읽어 `chroma_db/`에 저장한다. 오프라인에서 1회 실행
 - `rag.py`: 기능 2·3. 검색과 답변 생성, 근거 반환을 담당한다. `app.py`와 `ingest.py`가 이 로직을 공유한다
 - `app.py`: Streamlit 채팅 UI. 로직은 두지 않고 `rag.py`만 호출한다
-- `.env`에 `OPENAI_API_KEY`를 둔다. `.env`, `chroma_db/`, 가상환경은 git에서 제외한다. 따라서 EC2에서는 `ingest.py`를 다시 실행해야 한다
+- `.env`에 `OPENAI_API_KEY`를 둔다. `.env`, `chroma_db/`, 가상환경은 git에서 제외한다. EC2에는 로컬 `chroma_db/`를 rsync로 그대로 올린다(아래 "배포")
 
 ## 실행
 
@@ -73,7 +73,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - [x] **저장된 질문의 공개 범위**: 질문마다 브라우저 세션 id(`st.session_state`)를 붙여 자기 세션 질문만 보이고 지울 수 있다. 새로고침하면 새 세션이라 목록이 비워진다(DB에는 남음). 이전 결정 기록: **저장된 질문의 공개 범위 (배포 전 필수)**: 로그인 없이 링크로 공유하면, 한 사람이 저장한 질문(병력 등 민감정보 포함 가능)이 모든 방문자에게 보인다. 배포 전에 정해야 한다: 세션별로만 보이게 할지, 배포판에서는 저장 기능을 끌지, 아니면 로그인을 붙일지. `questions.db`가 EC2 디스크에 남는다는 점도 고려한다.
 - [x] **GPT 모델**: `gpt-5.4-mini`(`rag.py`의 `ANSWER_MODEL`). 이 API 키로 쓸 수 있는 최신 mini 모델이다.
   - 면책 문구는 "질문하기" 탭 아래에 한 줄로 잠정 추가했다. 개인정보 입력 안내는 아직 없다.
-- [x] **배포**: EC2 t3.micro(서울, 이름 `boheom-mate`, 고정 IP 3.36.241.30, 키 `~/.ssh/boheom-mate.pem`, SSH는 사용자 집 IP만 허용). 로컬 `chroma_db/`를 rsync로 올리고(서버에서 ingest 안 함) `deploy/setup.sh` 실행. 검색용 title·description·robots·sitemap은 nginx가 넣는다(`deploy/nginx.conf`, `deploy/seo/`). 도메인을 붙이면 이 세 곳의 IP를 바꾼다. 이전 항목: **배포 세부 (4주차)**: IP와 포트로 접속하게 할지, 도메인과 HTTPS를 붙일지 정한다. EC2에서 `ingest.py`를 다시 돌리는 절차도 정한다.
+- [x] **배포**: EC2 t3.micro(서울, 이름 `boheom-mate`, 고정 IP 3.36.241.30, 키 `~/.ssh/boheom-mate.pem`, SSH는 사용자 집 IP만 허용). 로컬 `chroma_db/`를 rsync로 올리고(서버에서 ingest 안 함) `deploy/setup.sh` 실행. 검색용 title·description·robots·sitemap은 nginx가 넣는다(`deploy/nginx.conf`, `deploy/seo/`). 도메인을 붙이면 이 세 곳의 IP를 바꾼다. 첫 질문 때 BM25 색인을 만드느라 서버에서 약 18초 걸려서, `app.py`의 `_warm_up`이 첫 방문 때 뒤에서 미리 만든다. 이전 항목: **배포 세부 (4주차)**: IP와 포트로 접속하게 할지, 도메인과 HTTPS를 붙일지 정한다. EC2에서 `ingest.py`를 다시 돌리는 절차도 정한다.
 
 ## 작업 방식
 

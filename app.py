@@ -7,12 +7,14 @@
 실행:  streamlit run app.py
 """
 import os
+import threading
 import uuid
 
 import streamlit as st
 
 import display
 import ingest
+import keyword_search
 import question_store
 import rag
 
@@ -29,6 +31,21 @@ DAILY_LIMIT = int(os.getenv("DAILY_QUESTION_LIMIT", "100"))  # 모든 방문자�
 if "session_id" not in st.session_state:
     st.session_state.session_id = uuid.uuid4().hex
 session_id = st.session_state.session_id
+
+
+@st.cache_resource
+def _warm_up():
+    """키워드 검색 색인(BM25)을 처음 만드는 데 서버(t3.micro)에서 약 18초 걸린다.
+    앱이 뜬 뒤 첫 방문 때 뒤에서 미리 만들어, 질문하는 사람이 기다리지 않게 한다."""
+    def build():
+        try:
+            keyword_search.search(["보험"], DEFAULT_SOURCE, 1)
+        except Exception:
+            pass  # 미리 못 만들어도 첫 질문 때 다시 만든다
+    threading.Thread(target=build, daemon=True).start()
+
+
+_warm_up()
 
 
 def short_name(source):
