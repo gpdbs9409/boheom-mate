@@ -1,10 +1,14 @@
 """보험메이트 화면.
 
-- 질문하기: 기능 2. 약관을 근거로 답하고, 질문과 답변을 저장해 목록으로 다시 본다 (새로고침해도 남음)
+- 질문하기: 기능 2. 약관을 근거로 답하고, 질문과 답변을 저장해 목록으로 다시 본다
+  (목록은 지금 브라우저 세션의 질문만 보이고, 새로고침하면 새 세션이 된다. 하루 전체 질문 수에 한도가 있다)
 - 약관 넣기: 기능 1
 
 실행:  streamlit run app.py
 """
+import os
+import uuid
+
 import streamlit as st
 
 import display
@@ -19,6 +23,12 @@ st.caption("보험약관 기반 AI 상담 도우미")
 tab_questions, tab_ingest = st.tabs(["질문하기", "약관 넣기"])
 
 DEFAULT_SOURCE = "KB_실손의료비보장보험_26.09_약관.pdf"
+DAILY_LIMIT = int(os.getenv("DAILY_QUESTION_LIMIT", "100"))  # 모든 방문자를 합친 하루 질문 수
+
+# 로그인이 없으므로 브라우저 세션마다 id를 하나 만들어, 질문 기록을 세션별로 나눈다
+if "session_id" not in st.session_state:
+    st.session_state.session_id = uuid.uuid4().hex
+session_id = st.session_state.session_id
 
 
 def short_name(source):
@@ -46,6 +56,8 @@ def render_questions():
     if submitted:
         if not text.strip():
             st.warning("질문을 입력해 주세요.")
+        elif not question_store.use_daily_quota(DAILY_LIMIT):
+            st.warning(f"오늘 질문 한도({DAILY_LIMIT}개)를 모두 사용했습니다. 내일 다시 이용해 주세요.")
         else:
             with st.spinner("약관을 찾아 답변을 만드는 중..."):
                 try:
@@ -54,12 +66,15 @@ def render_questions():
                     st.error(f"답변을 만들지 못했습니다: {e}")
                 else:
                     question_store.add(
-                        text.strip(), source, result["answer"], result["found"], result["evidence"],
+                        text.strip(), session_id, source, result["answer"], result["found"], result["evidence"],
                         result["summary"],
                     )
 
-    questions = question_store.list_all()
-    st.subheader(f"질문 기록 ({len(questions)}개)")
+    st.caption(f"오늘 남은 질문 {max(DAILY_LIMIT - question_store.used_today(), 0)}개 (모든 방문자 합계)")
+
+    questions = question_store.list_mine(session_id)
+    st.subheader(f"내 질문 기록 ({len(questions)}개)")
+    st.caption("이 브라우저 창에서 한 질문만 보이며, 새로고침하면 목록이 비워집니다.")
 
     if not questions:
         st.info("아직 질문이 없습니다. 위에 질문을 입력해 보세요.")
@@ -74,7 +89,7 @@ def render_questions():
             if q.get("summary"):
                 col_text.caption(f"질문 요지: {q['summary']}")
             if col_button.button("삭제", key=f"delete_{q['id']}", width="stretch"):
-                question_store.delete(q["id"])
+                question_store.delete(q["id"], session_id)
                 st.rerun()
             if q["found"] == 0:
                 st.warning(q["answer"])
