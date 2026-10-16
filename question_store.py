@@ -1,8 +1,9 @@
-"""사용자가 입력한 질문(과 답변)을 저장하고 다시 불러온다.
+"""채팅 대화를 저장하고 다시 불러온다.
 
 SQLite 파일(questions.db) 하나에 저장하므로 앱을 다시 켜도 남는다.
-로그인이 없으므로 질문마다 브라우저 세션 id를 붙여, 각 방문자는 자기 세션의 질문만 본다.
-하루 질문 수는 따로 센다(질문을 삭제해도 줄지 않도록).
+로그인이 없으므로 메시지마다 브라우저 세션 id를 붙여, 각 방문자는 자기 세션의 대화만 본다.
+하루 질문 수는 따로 센다.
+(예전 버전의 질문 하나·답변 하나 기록은 같은 파일의 questions 표에 그대로 남아 있다.)
 """
 import json
 import sqlite3
@@ -13,24 +14,23 @@ from zoneinfo import ZoneInfo
 DB_PATH = Path(__file__).parent / "questions.db"
 KST = ZoneInfo("Asia/Seoul")  # 서버(EC2)는 UTC라서 날짜를 한국 시간으로 맞춘다
 
-# 처음 만든 뒤에 추가된 칸. 예전 questions.db에도 자동으로 붙인다.
-EXTRA_COLUMNS = {"source": "TEXT", "answer": "TEXT", "found": "INTEGER", "evidence": "TEXT", "summary": "TEXT", "session_id": "TEXT"}
-
 
 def _connect():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute(
-        """CREATE TABLE IF NOT EXISTS questions (
+        """CREATE TABLE IF NOT EXISTS chat_messages (
                id INTEGER PRIMARY KEY AUTOINCREMENT,
-               text TEXT NOT NULL,
+               session_id TEXT NOT NULL,
+               role TEXT NOT NULL,
+               content TEXT NOT NULL,
+               source TEXT,
+               evidence TEXT,
+               calculation TEXT,
+               summary TEXT,
                created_at TEXT NOT NULL
            )"""
     )
-    existing = {row["name"] for row in conn.execute("PRAGMA table_info(questions)")}
-    for name, sql_type in EXTRA_COLUMNS.items():
-        if name not in existing:
-            conn.execute(f"ALTER TABLE questions ADD COLUMN {name} {sql_type}")
     conn.execute("CREATE TABLE IF NOT EXISTS daily_usage (day TEXT PRIMARY KEY, count INTEGER NOT NULL)")
     return conn
 
@@ -39,42 +39,38 @@ def _now():
     return datetime.now(KST)
 
 
-def add(text, session_id, source=None, answer=None, found=None, evidence=None, summary=None):
-    """evidence: 근거 조항 목록 [{"section", "article_no", "title", "text"}, ...]
-    summary: GPT가 파악한 질문 요지 한 줄"""
+def add_message(session_id, role, content, source=None, evidence=None, calculation=None, summary=None):
+    """role: "user" 또는 "assistant"
+    evidence: 근거 조항 목록 [{"section", "article_no", "title", "text"}, ...]
+    calculation: calculator.calculate 결과 + 계산에 쓴 값(inputs)"""
     with _connect() as conn:
         conn.execute(
-            """INSERT INTO questions (text, created_at, source, answer, found, evidence, summary, session_id)
+            """INSERT INTO chat_messages (session_id, role, content, source, evidence, calculation, summary, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                text,
-                _now().strftime("%Y-%m-%d %H:%M"),
-                source,
-                answer,
-                found,
-                json.dumps(evidence or [], ensure_ascii=False),
-                summary,
                 session_id,
+                role,
+                content,
+                source,
+                json.dumps(evidence or [], ensure_ascii=False),
+                json.dumps(calculation, ensure_ascii=False) if calculation else None,
+                summary,
+                _now().strftime("%Y-%m-%d %H:%M"),
             ),
         )
 
 
-def list_mine(session_id):
-    """이 세션의 질문만, 최근에 저장한 것이 먼저 오도록 반환한다."""
+def list_messages(session_id):
+    """이 세션의 대화를 오래된 것부터 반환한다."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM questions WHERE session_id = ? ORDER BY id DESC", (session_id,)
+            "SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id", (session_id,)
         ).fetchall()
-    questions = [dict(r) for r in rows]
-    for q in questions:
-        q["evidence"] = json.loads(q["evidence"] or "[]")
-    return questions
-
-
-def delete(question_id, session_id):
-    """자기 세션의 질문만 지울 수 있다."""
-    with _connect() as conn:
-        conn.execute("DELETE FROM questions WHERE id = ? AND session_id = ?", (question_id, session_id))
+    messages = [dict(r) for r in rows]
+    for m in messages:
+        m["evidence"] = json.loads(m["evidence"] or "[]")
+        m["calculation"] = json.loads(m["calculation"]) if m["calculation"] else None
+    return messages
 
 
 def use_daily_quota(limit):

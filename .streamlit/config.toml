@@ -3,3 +3,14 @@ headless = true
 
 [browser]
 gatherUsageStats = false
+
+# 금융권 느낌의 네이비 계열 (로고와 같은 색)
+[theme]
+base = "light"
+primaryColor = "#1F4FA3"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F6FB"
+textColor = "#16233A"
+
+[client]
+toolbarMode = "viewer"  # 개발용 Deploy 버튼 숨기기

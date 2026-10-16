@@ -25,6 +25,11 @@ INLINE_LABEL = re.compile(r"\s*((?:[가-힣] ){3,}[가-힣])\s+")
 PRIVATE_GLYPH = re.compile(r"[-]")
 # 강조할 숫자: 80%, 1만원, 180일, 3영업일, 50회, 99세 등
 AMOUNT = re.compile(r"(\d[\d,]*(?:\.\d+)?\s?(?:%|천만원|백만원|만원|원|영업일|일|회|년|세|개월))")
+# 보상 여부·금액을 가르는 표현. 숫자와 함께 붉은색으로 표시해 사용자가 판단 근거를 바로 보게 한다
+KEY_PHRASE = re.compile(
+    r"(보상하지 않습니다|보상하지 아니합니다|보상합니다|지급하지 않습니다|지급합니다|제외합니다|"
+    r"통원항목별 공제금액|공제금액|보장한도|한도로 합니다|중 큰 금액|뺀 금액|에 해당하는 금액)"
+)
 # 마크다운 기호로 잘못 해석될 수 있는 글자
 MD_SPECIAL = re.compile(r"([\\`*_#|~<>\[\]])")
 
@@ -71,7 +76,7 @@ def to_paragraphs(text):
 
 
 def to_markdown(text):
-    """원문을 읽기 좋은 마크다운으로 바꾼다. 숫자(금액·비율·기간)는 굵게 표시한다."""
+    """원문을 읽기 좋은 마크다운으로 바꾼다. 숫자(금액·비율·기간)와 판정 표현은 붉은 굵은 글씨로 표시한다."""
     blocks = []
     for p in to_paragraphs(text):
         if "label" in p:
@@ -80,9 +85,15 @@ def to_markdown(text):
         body = MD_SPECIAL.sub(r"\\\1", p["text"])
         # "2. 법령..."이 마크다운 번호 목록으로 바뀌어 번호가 달라지지 않게 막는다.
         body = re.sub(r"^(\d{1,2})\.", r"\1\\.", body)
-        body = AMOUNT.sub(r"**\1**", body)
+        body = AMOUNT.sub(r":red[**\1**]", body)
+        body = KEY_PHRASE.sub(r":red[**\1**]", body)
         blocks.append(body)
     return "\n\n".join(blocks)
+
+
+def highlight_answer(text):
+    """답변에서 굵게 쓴 부분(결론·금액)을 붉은색으로도 표시한다."""
+    return re.sub(r"\*\*(.+?)\*\*", r":red[**\1**]", text)
 
 
 def group_evidence(evidence):
@@ -110,3 +121,13 @@ def evidence_label(group):
         return "안내자료 (약관 이용 가이드)"
     name = f"{no} ({title})" if title else no
     return f"{section} · {name}" if section else name
+
+
+def evidence_label_md(group):
+    """펼치기 버튼용 마크다운. 어느 약관(구역)의 몇 조인지 붉은색으로 보여 준다."""
+    section, no = group["section"], group["article_no"]
+    plain = evidence_label(group)
+    if section and plain.startswith(section + " · "):
+        rest = plain[len(section) + 3:]
+        return f":red[**{section}**] · {rest}"
+    return f":red[**{plain}**]"

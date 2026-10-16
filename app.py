@@ -1,7 +1,7 @@
 """보험메이트 화면.
 
-- 질문하기: 기능 2. 약관을 근거로 답하고, 질문과 답변을 저장해 목록으로 다시 본다
-  (목록은 지금 브라우저 세션의 질문만 보이고, 새로고침하면 새 세션이 된다. 하루 전체 질문 수에 한도가 있다)
+- 상담하기: 기능 2·3. 이어지는 채팅으로 약관을 근거로 답하고, 영수증 금액으로 예상 보험금을 계산한다
+  (대화는 지금 브라우저 세션 것만 보이고, 새로고침하면 새 대화가 된다. 하루 전체 질문 수에 한도가 있다)
 - 약관 넣기: 기능 1
 
 실행:  streamlit run app.py
@@ -10,24 +10,40 @@ import os
 import threading
 import uuid
 
+import pandas as pd
 import streamlit as st
 
+import chat
 import display
 import ingest
 import keyword_search
+import products
 import question_store
 import rag
 
-st.set_page_config(page_title="보험메이트 - 실손보험 약관 AI 질의응답")
-st.title("보험메이트")
-st.caption("보험약관 기반 AI 상담 도우미")
+LOGO_TEXT = "assets/logo_text.svg"
+LOGO_CHARACTER = "assets/logo_character.svg"
 
-tab_questions, tab_ingest = st.tabs(["질문하기", "약관 넣기"])
+st.set_page_config(page_title="보험메이트 - 실손보험 약관 AI 질의응답", page_icon=LOGO_CHARACTER)
+st.logo(LOGO_TEXT, size="large")  # 사이드바가 없으면 icon_image가 대신 쓰이므로 텍스트 로고만 넘긴다
+# 글꼴: Pretendard (아이콘 글꼴은 건드리지 않도록 글자 요소에만 적용)
+st.html("""<style>
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css");
+html, body, p, div, span, label, input, textarea, button, h1, h2, h3, h4, li, td, th {
+  font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+[data-testid="stIconMaterial"], .material-symbols-rounded { font-family: "Material Symbols Rounded" !important; }
+img[data-testid="stHeaderLogo"] { height: 3rem; max-width: none; }  /* 기본 32px는 영문 글자가 안 읽혀서 키운다 */
+</style>""")
+st.markdown("#### 실손보험, 보장되는지 얼마 받는지 바로 알려 드려요")
+st.caption("가입한 보험의 약관을 근거로 답하고, 영수증 금액으로 예상 보험금을 계산해요.")
 
-DEFAULT_SOURCE = "KB_실손의료비보장보험_26.09_약관.pdf"
+tab_questions, tab_ingest = st.tabs(["상담하기", "약관 넣기"])
+
+DEFAULT_SOURCE = chat.CALCULATOR_SOURCE  # 첫 방문 때 미리 색인을 만들 약관
 DAILY_LIMIT = int(os.getenv("DAILY_QUESTION_LIMIT", "100"))  # 모든 방문자를 합친 하루 질문 수
 
-# 로그인이 없으므로 브라우저 세션마다 id를 하나 만들어, 질문 기록을 세션별로 나눈다
+# 로그인이 없으므로 브라우저 세션마다 id를 하나 만들어, 대화를 세션별로 나눈다
 if "session_id" not in st.session_state:
     st.session_state.session_id = uuid.uuid4().hex
 session_id = st.session_state.session_id
@@ -48,81 +64,127 @@ def _warm_up():
 _warm_up()
 
 
-def short_name(source):
-    return source.removesuffix(".pdf").removesuffix("_약관").replace("_", " ")
+# ---------- 상담하기 ----------
+EXAMPLES = [
+    "감기로 동네 병원 갔는데 실손 돼요?",
+    "도수치료 10만 원 냈는데 얼마 돌려받아요?",
+    "맹장 수술로 입원했어요. 보장되나요?",
+]
 
 
-# ---------- 질문하기 ----------
+def render_calculation(calc):
+    st.markdown(f"**💰 예상 보험금 :red[{calc['total']:,}원]**")
+    table = pd.DataFrame(
+        [{"항목": i["label"], "받는 돈": f"{i['amount']:,}원", "계산": i["how"], "근거": i["article"]}
+         for i in calc["items"]]
+    )
+    red = "color: #D92D20; font-weight: 600"
+    st.dataframe(table.style.map(lambda _: red, subset=["받는 돈", "근거"]), hide_index=True, width="stretch")
+    for note in calc["notes"]:
+        st.caption(f"· {note}")
+
+
+def render_evidence(evidence):
+    groups = display.group_evidence(evidence)
+    if groups:
+        st.caption(f"근거 조항 {len(groups)}개 · 눌러서 원문 보기")
+    for n, group in enumerate(groups, start=1):
+        with st.expander(f":red[**근거 {n}**] · {display.evidence_label_md(group)}"):
+            for i, text in enumerate(group["texts"]):
+                if i > 0:
+                    st.caption("⋯ 같은 조항의 다른 부분 ⋯")
+                st.markdown(display.to_markdown(text))
+
+
+def avatar(role):
+    return LOGO_CHARACTER if role == "assistant" else None
+
+
+def render_message(m):
+    with st.chat_message(m["role"], avatar=avatar(m["role"])):
+        st.markdown(display.highlight_answer(m["content"]) if m["role"] == "assistant" else m["content"])
+        if m.get("calculation"):
+            render_calculation(m["calculation"])
+        if m.get("summary"):
+            st.caption(f"질문 요지: {m['summary']}")
+        render_evidence(m.get("evidence") or [])
+
+
+def pick_product(sources):
+    """보험사 → 보험 종류 → 상품 이름(검색) 순서로 고른다. 상담할 수 있으면 약관 파일 이름을 반환한다."""
+    with st.container(border=True):
+        st.markdown("**내 보험 고르기**")
+        col_company, col_category = st.columns(2)
+        company = col_company.selectbox("보험사", [products.ALL] + products.COMPANIES)
+        category = col_category.selectbox("보험 종류", [products.ALL] + products.CATEGORIES)
+        keyword = st.text_input("보험 이름 검색", placeholder="예: 실손, 다이렉트, 간편")
+        found = products.search(company, category, keyword)
+        if not found:
+            st.info("조건에 맞는 보험을 아직 준비하지 못했어요. 지금은 KB손해보험 실손의료보험부터 준비하고 있어요.")
+            return None
+        col_product, col_new = st.columns([4, 1], vertical_alignment="bottom")
+        product = col_product.selectbox(f"보험 상품 ({len(found)}개)", found, format_func=products.label)
+        if col_new.button("새 대화", width="stretch"):
+            st.session_state.session_id = uuid.uuid4().hex
+            st.rerun()
+    if product["source"] not in sources:
+        st.info(f"'{product['name']}' 약관은 아직 준비 중이에요. 준비된 상품을 골라 주세요.")
+        return None
+    return product["source"]
+
+
 def render_questions():
     sources = rag.list_sources()
     if not sources:
         st.info("아직 DB에 저장된 약관이 없습니다. [약관 넣기] 탭에서 먼저 저장하세요.")
         return
 
-    with st.form("question_form", clear_on_submit=True):
-        # 개선 작업은 기본 약관으로 먼저 하고 있어서, 처음에는 기본 약관을 골라 둔다
-        default = sources.index(DEFAULT_SOURCE) if DEFAULT_SOURCE in sources else 0
-        source = st.selectbox("가입한 상품", sources, index=default, format_func=short_name)
-        text = st.text_area(
-            "질문",
-            placeholder="예: 맹장 수술로 입원했는데 실손보험금을 받을 수 있나요?",
-            height=100,
-        )
-        submitted = st.form_submit_button("질문하기", type="primary", width="stretch")
+    source = pick_product(sources)
+    if not source:
+        return
+    if source != chat.CALCULATOR_SOURCE:
+        st.caption("이 상품은 보험금 계산기를 아직 지원하지 않아요. 약관 내용 안내만 해 드려요.")
 
-    if submitted:
-        if not text.strip():
-            st.warning("질문을 입력해 주세요.")
-        elif not question_store.use_daily_quota(DAILY_LIMIT):
-            st.warning(f"오늘 질문 한도({DAILY_LIMIT}개)를 모두 사용했습니다. 내일 다시 이용해 주세요.")
-        else:
-            with st.spinner("약관을 찾아 답변을 만드는 중..."):
-                try:
-                    result = rag.answer(text.strip(), source)
-                except Exception as e:
-                    st.error(f"답변을 만들지 못했습니다: {e}")
-                else:
-                    question_store.add(
-                        text.strip(), session_id, source, result["answer"], result["found"], result["evidence"],
-                        result["summary"],
-                    )
-
-    st.caption(f"오늘 남은 질문 {max(DAILY_LIMIT - question_store.used_today(), 0)}개 (모든 방문자 합계)")
-
-    questions = question_store.list_mine(session_id)
-    st.subheader(f"내 질문 기록 ({len(questions)}개)")
-    st.caption("이 브라우저 창에서 한 질문만 보이며, 새로고침하면 목록이 비워집니다.")
-
-    if not questions:
-        st.info("아직 질문이 없습니다. 위에 질문을 입력해 보세요.")
-
-    for q in questions:
-        with st.container(border=True):
-            col_text, col_button = st.columns([5, 1], vertical_alignment="center")
-            col_text.markdown(f"**Q. {q['text']}**")
-            col_text.caption(
-                " · ".join(filter(None, [q["created_at"], q["source"] and short_name(q["source"])]))
+    messages = question_store.list_messages(session_id)
+    if not messages:
+        with st.chat_message("assistant", avatar=LOGO_CHARACTER):
+            st.markdown(
+                "안녕하세요, 보험메이트예요. 실손보험으로 **보장되는지**, **얼마 받는지** 물어보세요.\n\n"
+                "병원 영수증의 금액을 알려 주시면 예상 보험금도 계산해 드려요."
             )
-            if q.get("summary"):
-                col_text.caption(f"질문 요지: {q['summary']}")
-            if col_button.button("삭제", key=f"delete_{q['id']}", width="stretch"):
-                question_store.delete(q["id"], session_id)
+            st.caption("병명·주민번호 같은 개인정보는 적지 마세요. 질문은 답변을 만들기 위해 OpenAI로 전송됩니다.")
+        cols = st.columns(len(EXAMPLES))
+        for col, example in zip(cols, EXAMPLES):
+            if col.button(example, width="stretch"):
+                st.session_state.pending = example
                 st.rerun()
-            if q["found"] == 0:
-                st.warning(q["answer"])
-            elif q["answer"]:
-                st.markdown(q["answer"])
-            groups = display.group_evidence(q["evidence"])
-            if groups:
-                st.caption(f"근거 조항 {len(groups)}개 · 눌러서 원문 보기")
-            for n, group in enumerate(groups, start=1):
-                with st.expander(f"근거 {n} · {display.evidence_label(group)}"):
-                    for i, text in enumerate(group["texts"]):
-                        if i > 0:
-                            st.caption("⋯ 같은 조항의 다른 부분 ⋯")
-                        st.markdown(display.to_markdown(text))
+    for m in messages:
+        render_message(m)
 
-    st.caption("이 답변은 약관 내용을 안내하는 참고용이며, 실제 보험금 지급 여부는 보험사 심사로 확정됩니다.")
+    remaining = max(DAILY_LIMIT - question_store.used_today(), 0)
+    text = st.chat_input(f"질문을 입력하세요 (오늘 남은 질문 {remaining}개)") or st.session_state.pop("pending", None)
+    if not text or not text.strip():
+        st.caption("이 답변은 약관 내용을 안내하는 참고용이며, 실제 보험금 지급 여부는 보험사 심사로 확정됩니다.")
+        return
+    text = text.strip()
+    if not question_store.use_daily_quota(DAILY_LIMIT):
+        st.warning(f"오늘 질문 한도({DAILY_LIMIT}개)를 모두 사용했습니다. 내일 다시 이용해 주세요.")
+        return
+
+    render_message({"role": "user", "content": text})
+    with st.chat_message("assistant", avatar=LOGO_CHARACTER):
+        with st.spinner("약관을 찾아보는 중..."):
+            try:
+                result = chat.reply(messages + [{"role": "user", "content": text}], source)
+            except Exception as e:
+                st.error(f"답변을 만들지 못했습니다: {e}")
+                return
+    question_store.add_message(session_id, "user", text, source)
+    question_store.add_message(
+        session_id, "assistant", result["content"], source,
+        result["evidence"], result["calculation"], result["summary"],
+    )
+    st.rerun()
 
 
 with tab_questions:

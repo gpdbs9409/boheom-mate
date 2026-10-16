@@ -7,6 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `boheom-mate`: 보험약관(실손의료보험 표준약관) 기반 RAG 질의응답 앱. 금융권 취업 포트폴리오용이며, 사용자는 초보자로 30일 안에 완성하는 것이 목표다.
 
 > 현재 상태: Python 3.12와 `.venv` 설치 완료. 기능 1(약관 넣기)을 구현했고, 기본 약관(25478) 1개만 Chroma에 저장했다(긴 조항을 나눠 308조각). 나머지 4개는 RAG 성능을 확인한 뒤 하나씩 추가하기로 했으니, `python ingest.py`(전체 저장)는 쓰지 않는다. 핵심 기능 3개를 모두 구현했다. `app.py`의 "질문하기" 탭에서 상품을 고르고 질문하면 `rag.answer()`가 답한다. `source`로 필터링하고, 원래 질문과 약관 용어로 바꾼 질문으로 조각 8개(`TOP_K`)를 검색한다. 그다음 `gpt-5.4-mini`가 JSON(found/answer/evidence 번호)으로 답한다. 질문, 답변, 근거 조항 원문은 SQLite에 저장되어 목록과 펼치기로 다시 볼 수 있다. "약관 넣기" 탭은 PDF 하나를 골라 미리 보고 저장하며, 업로드 기능은 아니다. 폴더는 아직 `my-app`이고 `boheom-mate`로 이름을 바꿀 예정이다.
+>
+> 2026-10-17 추가(사용자 요청): "상담하기" 탭이 채팅으로 바뀌었다. `chat.reply`가 OpenAI 도구 호출로 턴마다 `search_terms`(= `rag.answer`) / `calculate_payout`(= `calculator.calculate`, 기본 약관 제3조 공식) / 되묻기를 고른다. 금액은 반드시 코드가 계산한다. 쉬운 말 규칙은 `chat.PLAIN_LANGUAGE`. 대화는 `question_store`의 `chat_messages` 표에 세션별로 저장한다. 상품 선택은 `products.py`(보험사 → 종류 → 이름 검색, 껍데기: `source`가 있는 상품만 상담 가능). 로고는 `assets/`(Pretendard 글자를 path로 딴 SVG), 글꼴은 Pretendard, 근거·금액·판정 표현은 붉은색 강조(`display.py`). 평가는 `eval/run_chat.py`(E5), 계산기 테스트는 `tests/test_calculator.py`.
 
 ## 범위: 핵심 기능 3개만
 
@@ -15,6 +17,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. **약관 넣기**: PDF → "제○조" 단위로 분할 → 임베딩 → Chroma 저장
 2. **질문 → 관련 조항 검색 → 답변 생성**
 3. **근거 조항 원문 표시**: 검색된 조항에 근거가 없으면 지어내지 말고 "약관에서 확인 불가"로 답한다
+
+(4번째 기능으로 사용자 요청에 따라 "이어지는 상담 + 보험금 계산기"를 추가했다.)
 
 나중에 할 것(사용자가 요청하기 전에는 구현하지 않는다): 로그인/회원가입, 알림, 공유, 통계, 관리자 화면, 화면에서 PDF 업로드, 대화 기록 저장, 여러 약관 비교, 하이브리드 검색(BM25), 배포. (대화 기록 저장은 사용자 요청으로 구현했다. 평가셋도 구현했다.)
 
