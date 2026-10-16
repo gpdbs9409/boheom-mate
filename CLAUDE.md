@@ -49,7 +49,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 일관성 개선 후(같은 날): `TEMPERATURE=0`, `rewrite_query` 결과를 `lru_cache`로 기억, `glossary.py` 용어 사전(일상어 → 약관 용어)을 검색어와 답변 프롬프트에 붙인다. 점수는 검색 71%, 거절 100%, 키워드 76%이고, 회차 간 흔들림이 없어졌다. 같은 질문 3번의 검색 결과 일치는 0/20에서 19/20, 근거 일치율은 60%다. 남은 흔들림은 답변 GPT가 같은 후보 중 고르는 근거가 달라지는 것이다. 검색 실패(D01~D03, D13, D16)는 공제금액 표가 들어 있는 제3조 조각(id -33, -36)이 비슷한 제3조 조각 20여 개에 밀리는 것이 원인이다.
 - 정확도 실험은 `eval/EXPERIMENTS.md`에 가설, 바꾼 것, 결과 파일, 판정을 남긴다. 사용자가 최종 확인한다. 현재 채택안은 E2(하이브리드)로 검색 적중 94%, 상위 3 82%, MRR 0.59다.
 - 검색 구조(E2): `rag.analyze_question`(GPT가 약관 용어 문장과 키워드 추출, 캐시) → 벡터 검색 3개(Chroma) + 키워드 검색 1개(`keyword_search.py`: kiwi 형태소 분석 + BM25) → RRF로 합쳐 상위 8개. 조각마다 `section`(안내자료/보통약관/특별약관1·2/제도성 특약/별표/관련 법규) 메타데이터가 있다. `ingest.py`를 바꾸면 기본 약관만 `build_index`로 다시 넣는다.
-- 현재 기본값은 E3b다: `rag.analyze_question`이 질문 요지를 정해진 보기(대상/원인/치료/질문 유형/약관 용어)에서 고르고, `build_queries`가 요지로 검색어를 만든다. 원래 질문도 벡터 검색어로 함께 쓴다(`INCLUDE_RAW_QUESTION`). 표현만 다른 질문의 일관성은 `eval/run_paraphrase.py`로 잰다. 화면에는 "질문 요지"를 보여 준다(`questions.summary` 칸).
+- 현재 기본값은 E4다(E3b + `REQUIRED_ARTICLES`: 질문 유형별 필수 조항을 보통약관·특약마다 한 조각씩 먼저 넣는다). E3b 설명: `rag.analyze_question`이 질문 요지를 정해진 보기(대상/원인/치료/질문 유형/약관 용어)에서 고르고, `build_queries`가 요지로 검색어를 만든다. 원래 질문도 벡터 검색어로 함께 쓴다(`INCLUDE_RAW_QUESTION`). 표현만 다른 질문의 일관성은 `eval/run_paraphrase.py`로 잰다. 화면에는 "질문 요지"를 보여 준다(`questions.summary` 칸).
 - 구역 판별(`ingest.find_sections`)은 기본 약관(25478) 기준으로 만들었다. 간편가입(25481)에서는 "기본형 실손의료보험" 시작 줄을 찾지 못해 안내자료가 보통약관으로 잡힌다. DB에 있는 간편가입 162조각은 예전 방식으로 잘린 것이다. 앱의 상품 기본값은 기본 약관이다.
 - GitHub: 원격 저장소는 `git@github.com:gpdbs9409/boheom-mate.git`(SSH, 포트 443 설정). 약관 PDF(`data/*.pdf`)는 올리지 않는다.
 - `glossary.py`에 용어를 추가할 때는 약관에 실제로 있는 용어인지 확인한다. 평가셋의 정답 숫자를 사전에 넣으면 점수가 부풀려지니 넣지 않는다.

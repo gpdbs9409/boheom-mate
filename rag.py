@@ -131,6 +131,17 @@ def build_queries(analysis):
     return queries, keyword_text
 
 
+# 질문 유형별로 꼭 봐야 하는 조항(제목이 이것으로 시작하는 조항). 보상 담당자가 확인하는 순서와 같다.
+# 보통약관과 각 특약에서 가장 관련 있는 조각을 하나씩 검색 순위와 상관없이 후보에 넣는다.
+REQUIRED_ARTICLES = {
+    "보상여부": ["보장종목별 보상내용", "보상하지 않는 사항"],
+    "보상금액": ["보장종목별 보상내용"],
+    "보상한도": ["보장종목별 보상내용", "보험가입금액 한도"],
+}
+# 필수 조항을 찾을 구역: 실제 보장을 정하는 보통약관과 보장 특약. 안내자료·제도성 특약·별표·법규는 뺀다
+NON_COVERAGE_SECTIONS = (ingest.GUIDE, "제도성 특약", "별표", "관련 법규")
+USE_REQUIRED_ARTICLES = True
+
 # 검색 방식. "vector": 의미 검색만, "hybrid": 의미 검색 + 키워드 검색(BM25)
 SEARCH_MODE = "hybrid"
 # 각 검색에서 후보를 몇 개씩 가져와 합칠지
@@ -141,6 +152,7 @@ RRF_C = 60
 INCLUDE_RAW_QUESTION = True
 SEARCH_SETTINGS = {
     "include_raw_question": INCLUDE_RAW_QUESTION,
+    "required_articles": USE_REQUIRED_ARTICLES,
     "search": SEARCH_MODE,
     "query": "structured",
     "chunking": "sections",
@@ -212,9 +224,68 @@ def search(question, source, k=TOP_K, debug=None):
     for hits in [*vector_lists, keyword_hits]:
         for rank, (id_, doc, meta, _) in enumerate(hits, start=1):
             if id_ not in found:
-                found[id_] = _article(meta, doc, score=0.0)
+                found[id_] = _article(meta, doc, score=0.0, id=id_)
             found[id_]["score"] += 1 / (RRF_C + rank)
-    return sorted(found.values(), key=lambda a: a["score"], reverse=True)[:k]
+    ranked = sorted(found.values(), key=lambda a: a["score"], reverse=True)
+
+    required = []
+    if USE_REQUIRED_ARTICLES and analysis["intent"] in REQUIRED_ARTICLES:
+        required = _required_chunks(
+            REQUIRED_ARTICLES[analysis["intent"]], source, embeddings, keyword_tokens, found
+        )
+    if debug is not None:
+        debug["required"] = [f'{a["section"]} {a["article_no"]}' for a in required]
+    # 필수 조각을 먼저 자리 잡고, 남은 자리를 검색 순위대로 채운다. 화면·평가에는 점수 순으로 보낸다
+    picked = {a["id"]: a for a in required[:k]}
+    for a in ranked:
+        if len(picked) >= k:
+            break
+        picked.setdefault(a["id"], a)
+    return sorted(picked.values(), key=lambda a: a["score"], reverse=True)
+
+
+def _required_chunks(title_prefixes, source, embeddings, keyword_tokens, found):
+    """필수 조항마다, 보통약관과 각 보장 특약에서 질문과 가장 가까운 조각을 하나씩 고른다.
+
+    해당 조항의 조각들만 놓고 의미 검색 순위와 키워드 검색 순위를 RRF로 합쳐 1등을 고른다.
+    전체 검색에서 받은 점수(found)가 있으면 그 점수를 쓰고, 없으면 0으로 둔다(맨 뒤로 정렬).
+    """
+    import keyword_search
+
+    data = _collection().get(where={"source": source}, include=["metadatas"])
+    titles = sorted({
+        m["title"] for m in data["metadatas"]
+        if any(m["title"].startswith(t) for t in title_prefixes)
+        and not m.get("section", "").startswith(NON_COVERAGE_SECTIONS)
+    })
+    if not titles:
+        return []
+    where = {"$and": [{"source": source}, {"title": {"$in": titles}}]}
+    count = sum(1 for m in data["metadatas"] if m["title"] in titles)
+    result = _collection().query(query_embeddings=embeddings, n_results=count, where=where)
+
+    scores = {}
+    for ids, docs, metas in zip(result["ids"], result["documents"], result["metadatas"]):
+        for rank, (id_, doc, meta) in enumerate(zip(ids, docs, metas), start=1):
+            if meta.get("section", "").startswith(NON_COVERAGE_SECTIONS):
+                continue
+            entry = scores.setdefault(id_, {"meta": meta, "doc": doc, "score": 0.0})
+            entry["score"] += 1 / (RRF_C + rank)
+    allowed = set(scores)
+    keyword_ranked = [h for h in keyword_search.search(keyword_tokens, source, 10_000) if h[0] in allowed]
+    for rank, (id_, _, _, _) in enumerate(keyword_ranked, start=1):
+        scores[id_]["score"] += 1 / (RRF_C + rank)
+
+    best = {}
+    for id_, e in scores.items():
+        key = (e["meta"].get("section", ""), e["meta"]["title"])
+        if key not in best or e["score"] > best[key][1]["score"]:
+            best[key] = (id_, e)
+    chunks = []
+    for id_, e in best.values():
+        score = found[id_]["score"] if id_ in found else 0.0
+        chunks.append(_article(e["meta"], e["doc"], score=score, id=id_))
+    return sorted(chunks, key=lambda a: a["score"], reverse=True)
 
 
 SYSTEM_PROMPT = """당신은 보험약관 상담 도우미입니다.
