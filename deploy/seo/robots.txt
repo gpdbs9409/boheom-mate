@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /_stcore/
 
-Sitemap: http://3.36.241.30/sitemap.xml
+Sitemap: https://boheommate.duckdns.org/sitemap.xml

@@ -13,7 +13,7 @@ if [ ! -f /swapfile ]; then
 fi
 
 sudo apt-get update -y
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv python3-pip nginx
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv python3-pip nginx certbot python3-certbot-nginx
 
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
@@ -22,6 +22,10 @@ python3 -m venv .venv
 sudo cp deploy/boheom-mate.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now boheom-mate
+
+# HTTPS 인증서(Let's Encrypt). 도메인이 이 서버 IP를 가리키고 있어야 받을 수 있다. 이미 있으면 건너뛴다
+sudo certbot certonly --nginx -d boheommate.duckdns.org --non-interactive --agree-tos \
+  --register-unsafely-without-email --keep-until-expiring --deploy-hook "systemctl reload nginx"
 
 sudo mkdir -p /var/www/boheom-mate
 sudo cp deploy/seo/robots.txt deploy/seo/sitemap.xml /var/www/boheom-mate/
