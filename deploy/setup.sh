@@ -23,6 +23,8 @@ sudo cp deploy/boheom-mate.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now boheom-mate
 
+sudo mkdir -p /var/www/boheom-mate
+sudo cp deploy/seo/robots.txt deploy/seo/sitemap.xml /var/www/boheom-mate/
 sudo cp deploy/nginx.conf /etc/nginx/sites-available/boheom-mate
 sudo ln -sf /etc/nginx/sites-available/boheom-mate /etc/nginx/sites-enabled/boheom-mate
 sudo rm -f /etc/nginx/sites-enabled/default

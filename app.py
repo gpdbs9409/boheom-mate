@@ -12,7 +12,7 @@ import ingest
 import question_store
 import rag
 
-st.set_page_config(page_title="보험메이트")
+st.set_page_config(page_title="보험메이트 - 실손보험 약관 AI 질의응답")
 st.title("보험메이트")
 st.caption("보험약관 기반 AI 상담 도우미")
 
