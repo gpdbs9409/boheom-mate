@@ -2,8 +2,10 @@
 
 서버의 state/ 폴더가 원본이다. 코드를 배포할 때 덮어쓰지 않는다.
 """
+import fcntl
 import json
 import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,3 +46,24 @@ def log(event, path=LOG_FILE):
     line = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), **event}
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(line, ensure_ascii=False) + "\n")
+
+
+class Busy(Exception):
+    """다른 실행이 상태 파일을 쓰는 중."""
+
+
+@contextmanager
+def lock(state_path=STATE_FILE, wait=True):
+    """주간 확인과 승인 반영이 동시에 상태 파일을 읽고 써서 서로 덮어쓰지 않게 한다.
+    wait=False이면 이미 잠겨 있을 때 기다리지 않고 Busy를 낸다."""
+    path = Path(state_path).parent / ".lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+        except BlockingIOError:
+            raise Busy() from None
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)

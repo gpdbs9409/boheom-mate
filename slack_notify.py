@@ -32,10 +32,13 @@ class Slack:
             kwargs["thread_ts"] = thread_ts
         return self.client.chat_postMessage(**kwargs)["ts"]
 
-    def approved(self, ts):
+    def approved(self, ts, after=None):
+        """after가 있으면 그 ts 뒤에 단 답글만 본다(반영 실패 답글 뒤에 다시 단 "승인")."""
         replies = self.client.conversations_replies(channel=self.channel, ts=ts)["messages"][1:]  # 첫 메시지는 부모
         return any(
-            m.get("user") == self.operator and (m.get("text") or "").strip() == APPROVE_WORD
+            m.get("user") == self.operator
+            and (m.get("text") or "").strip() == APPROVE_WORD
+            and (after is None or float(m.get("ts", 0)) > float(after))
             for m in replies
         )
 
@@ -52,7 +55,8 @@ def item_message(item):
         f'조각 {sum(check["sections"].values())}개 · 구역별: {sections}',
     ]
     if check["ok"]:
-        lines.append("점검: 정상")
+        notes = check.get("notes") or []
+        lines.append(f"점검: 정상(참고 {len(notes)}건)" if notes else "점검: 정상")
     else:
         lines.append("점검: 확인 필요")
         lines += [f"- {reason}" for reason in check["reasons"]]
@@ -66,8 +70,8 @@ def item_message(item):
     return "\n".join(lines)
 
 
-def summary_message(results, waiting, today, notes=()):
-    """notes: 보험사 줄 아래에 덧붙일 말(inbox 파일 이름 오류 등)"""
+def summary_message(results, waiting, today, notes=(), failed=()):
+    """notes: 보험사 줄 아래에 덧붙일 말(inbox 파일 이름 오류 등), failed: 반영에 실패한 항목"""
     lines = [f"[주간 약관 확인] {today}"]
     for r in results:
         lines.append(f'{r["company"]}: ' + STATUS_LINES[r["status"]].format(count=r["count"], error=r.get("error")))
@@ -75,4 +79,7 @@ def summary_message(results, waiting, today, notes=()):
     if waiting:
         lines.append(f"승인 대기 {len(waiting)}건:")
         lines += [f'- {_title(item)} ({item["created"]}부터)' for item in waiting]
+    if failed:
+        lines.append(f'반영 실패 {len(failed)}건 (다시 하려면 그 메시지의 "반영 실패" 답글 아래에 "승인"을 한 번 더 달아 주세요):')
+        lines += [f'- {_title(item)}: {item.get("error")}' for item in failed]
     return "\n".join(lines)

@@ -137,7 +137,7 @@ def pick_product(sources):
         if len(versions) > 1:
             product = st.selectbox("약관 판 (가입한 시점)", versions, format_func=lambda e: f'{e["edition"]}판')
     if product["source"] not in sources:
-        st.info(f"'{product['name']}' 약관은 아직 준비 중이에요. 준비된 상품을 골라 주세요.")
+        st.info(f"'{product['product']}' 약관은 아직 준비 중이에요. 준비된 상품을 골라 주세요.")
         return None
     return product["source"]
 

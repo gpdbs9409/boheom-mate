@@ -17,7 +17,11 @@ class FakeSlack:
         self.approved_ts = set(approved_ts)
         self.replies = []
 
-    def approved(self, ts):
+    def approved(self, ts, after=None):
+        if ts == "bad":
+            raise RuntimeError("thread_not_found")  # 운영자가 메시지를 지운 경우 등
+        if after is not None:
+            return (ts, after) in self.approved_ts  # 실패 답글 뒤에 단 새 "승인"
         return ts in self.approved_ts
 
     def post(self, text, thread_ts=None):
@@ -77,5 +81,64 @@ with tempfile.TemporaryDirectory() as d:
     except KeyboardInterrupt:
         pass
     assert site_calls == ["stop", "start"], site_calls
+
+# 다른 실행(주간 확인)이 상태 파일을 쓰는 중이면 이번 차례는 건너뛴다
+with tempfile.TemporaryDirectory() as d:
+    d = Path(d)
+    state_path = d / "state" / "sync.json"
+    sync_state.save({"known": [], "pending": [item("1", "A")]}, state_path)
+    calls = []
+    with sync_state.lock(state_path):
+        r = apply_approved.run(slack=FakeSlack(["1"]), state_path=state_path, products_path=d / "p.json", data_dir=d,
+                               build_index=lambda a, s: calls.append(s) or 1, split=lambda p: [], site=calls.append)
+    assert r == [] and calls == []
+
+# 한 항목의 Slack 오류(지워진 메시지)는 그 항목만 건너뛰고 나머지는 반영한다
+with tempfile.TemporaryDirectory() as d:
+    d = Path(d)
+    state_path = d / "state" / "sync.json"
+    sync_state.save({"known": [], "pending": [item("bad", "X"), item("1", "A")]}, state_path)
+    r = apply_approved.run(slack=FakeSlack(["1"]), state_path=state_path, products_path=d / "p.json", data_dir=d,
+                           build_index=lambda a, s: 1, split=lambda p: [], site=lambda a: None)
+    assert r == ["삼성화재|A|26.10"], r
+
+# 반영 실패한 항목은 실패 답글 아래에 운영자가 "승인"을 한 번 더 달면 다시 시도한다
+with tempfile.TemporaryDirectory() as d:
+    d = Path(d)
+    state_path = d / "state" / "sync.json"
+    sync_state.save({"known": [], "pending": [item("1", "A")]}, state_path)
+    attempts = []
+
+    def flaky(articles, source):
+        attempts.append(source)
+        if len(attempts) == 1:
+            raise RuntimeError("timeout")
+        return 5
+
+    slack = FakeSlack(["1"])
+    args = dict(state_path=state_path, products_path=d / "p.json", data_dir=d, build_index=flaky, split=lambda p: [], site=lambda a: None)
+    apply_approved.run(slack=slack, **args)
+    failed = sync_state.load(state_path)["pending"][0]
+    assert failed["status"] == "failed" and failed["failed_reply_ts"] == "x"
+    assert apply_approved.run(slack=slack, **args) == [] and len(attempts) == 1  # 새 승인 전에는 다시 하지 않는다
+    slack.approved_ts.add(("1", "x"))
+    assert apply_approved.run(slack=slack, **args) == ["삼성화재|A|26.10"] and len(attempts) == 2
+
+# 사이트 시작이 실패해도 반영 결과는 저장된다(5분마다 다시 임베딩하지 않게)
+with tempfile.TemporaryDirectory() as d:
+    d = Path(d)
+    state_path = d / "state" / "sync.json"
+    sync_state.save({"known": [], "pending": [item("1", "A")]}, state_path)
+
+    def site(action):
+        if action == "start":
+            raise RuntimeError("systemctl 실패")
+
+    try:
+        apply_approved.run(slack=FakeSlack(["1"]), state_path=state_path, products_path=d / "p.json", data_dir=d,
+                           build_index=lambda a, s: 1, split=lambda p: [], site=site)
+    except RuntimeError:
+        pass
+    assert sync_state.load(state_path)["pending"][0]["status"] == "applied"
 
 print("OK")

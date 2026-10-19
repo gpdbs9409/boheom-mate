@@ -117,4 +117,15 @@ with tempfile.TemporaryDirectory() as d:
     run({}, slack)
     assert any(p.startswith("[새 약관] 한화손해보험") for p in slack.posts)
 
+# 반영 실패한 항목도 주간 요약에 계속 보인다
+with tempfile.TemporaryDirectory() as d:
+    d = Path(d)
+    state_path = d / "state" / "sync.json"
+    sync_state.save({"known": [], "pending": [{"key": "k", "company": "삼성화재", "category": "실손의료보험", "product": "P",
+                     "edition": "26.10", "pdf": "p.pdf", "check": GOOD, "slack_ts": "1", "status": "failed",
+                     "created": "2026-10-19", "error": "timeout"}]}, state_path)
+    slack = FakeSlack()
+    weekly_check.run(enabled={}, manual=[], slack=slack, state_path=state_path, data_dir=d, inbox=d / "inbox",
+                     split=fake_split, today="2026-10-26")
+    assert "반영 실패 1건" in slack.posts[0]
 print("OK")

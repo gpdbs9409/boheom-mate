@@ -53,9 +53,11 @@ def _new_item(company, category, product, edition, pdf, split, today):
 def run(enabled=insurers.ENABLED, manual=insurers.MANUAL, slack=None, state_path=sync_state.STATE_FILE,
         data_dir=ingest.DATA_DIR, inbox=INBOX, split=None, today=None):
     """반환값: 보험사별 결과 [{"company", "status", "count", "error"}]"""
-    split = split or _default_split
-    today = today or _today()
-    data_dir, inbox = Path(data_dir), Path(inbox)
+    with sync_state.lock(state_path):
+        return _run(enabled, manual, slack, state_path, Path(data_dir), Path(inbox), split or _default_split, today or _today())
+
+
+def _run(enabled, manual, slack, state_path, data_dir, inbox, split, today):
     state = sync_state.load(state_path)
     known = set(state["known"])
     waiting = [p for p in state["pending"] if p["status"] == "pending"]
@@ -113,7 +115,8 @@ def run(enabled=insurers.ENABLED, manual=insurers.MANUAL, slack=None, state_path
     try:
         if slack is None:
             slack = Slack()
-        slack.post(summary_message(results, waiting, today, notes))
+        failed = [p for p in state["pending"] if p["status"] == "failed"]
+        slack.post(summary_message(results, waiting, today, notes, failed))
         for item in state["pending"]:
             if item["status"] == "pending" and not item["slack_ts"]:
                 item["slack_ts"] = slack.post(item_message(item))
