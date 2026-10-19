@@ -1,0 +1,10 @@
+# 매주 월요일 오전 9시(한국 시간)에 새 실손 약관을 확인한다. 서버가 꺼져 있었으면 켜진 뒤 바로 실행한다
+[Unit]
+Description=boheom-mate weekly-check every Monday 09:00 KST
+
+[Timer]
+OnCalendar=Mon *-*-* 09:00:00 Asia/Seoul
+Persistent=true
+
+[Install]
+WantedBy=timers.target

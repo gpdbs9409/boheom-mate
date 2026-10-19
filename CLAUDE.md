@@ -37,7 +37,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `ingest.py`: 기능 1. `data/`의 PDF를 읽어 `chroma_db/`에 저장한다. 오프라인에서 1회 실행
 - `rag.py`: 기능 2·3. 검색과 답변 생성, 근거 반환을 담당한다. `app.py`와 `ingest.py`가 이 로직을 공유한다
 - `app.py`: Streamlit 채팅 UI. 로직은 두지 않고 `rag.py`만 호출한다
-- `.env`에 `OPENAI_API_KEY`를 둔다. `.env`, `chroma_db/`, 가상환경은 git에서 제외한다. EC2에는 로컬 `chroma_db/`를 rsync로 그대로 올린다(아래 "배포")
+- `.env`에 `OPENAI_API_KEY`를 둔다. `.env`, `chroma_db/`, `state/`, 가상환경은 git에서 제외한다. 2026-10-19부터 `chroma_db/`·`data/`·`state/`는 **서버가 원본**이다(아래 "주간 약관 확인"). 코드는 `deploy/push.sh`로만 올린다
 
 ## 실행
 
@@ -77,7 +77,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - [x] **저장된 질문의 공개 범위**: 질문마다 브라우저 세션 id(`st.session_state`)를 붙여 자기 세션 질문만 보이고 지울 수 있다. 새로고침하면 새 세션이라 목록이 비워진다(DB에는 남음). 이전 결정 기록: **저장된 질문의 공개 범위 (배포 전 필수)**: 로그인 없이 링크로 공유하면, 한 사람이 저장한 질문(병력 등 민감정보 포함 가능)이 모든 방문자에게 보인다. 배포 전에 정해야 한다: 세션별로만 보이게 할지, 배포판에서는 저장 기능을 끌지, 아니면 로그인을 붙일지. `questions.db`가 EC2 디스크에 남는다는 점도 고려한다.
 - [x] **GPT 모델**: `gpt-5.4-mini`(`rag.py`의 `ANSWER_MODEL`). 이 API 키로 쓸 수 있는 최신 mini 모델이다.
   - 면책 문구는 "질문하기" 탭 아래에 한 줄로 잠정 추가했다. 개인정보 입력 안내는 아직 없다.
-- [x] **배포**: EC2 t3.micro(서울, 이름 `boheom-mate`, 고정 IP 3.36.241.30, 키 `~/.ssh/boheom-mate.pem`, SSH는 사용자 집 IP만 허용). 로컬 `chroma_db/`를 rsync로 올리고(서버에서 ingest 안 함) `deploy/setup.sh` 실행. 검색용 title·description·robots·sitemap은 nginx가 넣는다(`deploy/nginx.conf`, `deploy/seo/`). 주소는 https://boheommate.duckdns.org (DuckDNS 무료 도메인, 사용자 GitHub 계정으로 관리, IP를 3.36.241.30으로 직접 지정). HTTPS는 Let's Encrypt 인증서(certbot.timer가 자동 갱신)이고 http와 IP 접속은 https 도메인으로 넘긴다. 주소를 바꾸면 nginx.conf와 seo/ 두 파일의 주소를 함께 바꾼다. 첫 질문 때 BM25 색인을 만드느라 서버에서 약 18초 걸려서, `app.py`의 `_warm_up`이 첫 방문 때 뒤에서 미리 만든다. 이전 항목: **배포 세부 (4주차)**: IP와 포트로 접속하게 할지, 도메인과 HTTPS를 붙일지 정한다. EC2에서 `ingest.py`를 다시 돌리는 절차도 정한다.
+- [x] **배포**: EC2 t3.micro(서울, 이름 `boheom-mate`, 고정 IP 3.36.241.30, 키 `~/.ssh/boheom-mate.pem`, SSH는 사용자 집 IP만 허용). (2026-10-19 변경) 코드는 `deploy/push.sh`(chroma_db/·data/·state/·questions.db 제외 rsync)로 올리고 `deploy/setup.sh` 실행. 약관은 서버에서 주간 약관 확인이 넣는다(아래). 검색용 title·description·robots·sitemap은 nginx가 넣는다(`deploy/nginx.conf`, `deploy/seo/`). 주소는 https://boheommate.duckdns.org (DuckDNS 무료 도메인, 사용자 GitHub 계정으로 관리, IP를 3.36.241.30으로 직접 지정). HTTPS는 Let's Encrypt 인증서(certbot.timer가 자동 갱신)이고 http와 IP 접속은 https 도메인으로 넘긴다. 주소를 바꾸면 nginx.conf와 seo/ 두 파일의 주소를 함께 바꾼다. 첫 질문 때 BM25 색인을 만드느라 서버에서 약 18초 걸려서, `app.py`의 `_warm_up`이 첫 방문 때 뒤에서 미리 만든다. 이전 항목: **배포 세부 (4주차)**: IP와 포트로 접속하게 할지, 도메인과 HTTPS를 붙일지 정한다. EC2에서 `ingest.py`를 다시 돌리는 절차도 정한다.
+
+## 주간 약관 확인 (2026-10-19 추가, 사용자 요청)
+
+설계: `docs/superpowers/specs/2026-10-19-weekly-yakgwan-sync-design.md`, 계획: `docs/superpowers/plans/2026-10-19-weekly-yakgwan-sync.md`.
+
+- `weekly_check.py`(월 09:00 KST, `deploy/weekly-check.timer`): `insurers/`의 보험사별 모듈이 공시실에서 판매 중 실손 약관을 읽고, 처음 보는 약관(회사+상품+판, `sync_state.key`)을 `data/`에 받고, `split_check.check`로 점검해 Slack에 올린다. `data/inbox/`의 `보험사__상품__판.pdf`도 처리한다.
+- `apply_approved.py`(5분마다): 운영자(`SLACK_OPERATOR_ID`)가 약관 메시지에 정확히 "승인" 답글을 달면 사이트를 멈추고 `ingest.build_index` → `products.add` → 사이트 시작.
+- 상품 목록은 `state/products.json`(없으면 `products_seed.json`). 판마다 항목 하나, 옛 판은 지우지 않고 화면에서 판을 고른다.
+- 배포판에서는 "약관 넣기" 탭이 숨겨진다(로컬은 `.env`에 `SHOW_INGEST_TAB=1`).
+- Slack 설정과 매주 할 일: `docs/slack-setup.md`.
+- 테스트: `tests/test_*.py`를 각각 `.venv/bin/python`으로 실행(pytest 없음).
 
 ## 작업 방식
 

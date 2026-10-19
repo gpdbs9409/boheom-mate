@@ -1,0 +1,9 @@
+[Unit]
+Description=boheom-mate apply-approved
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/boheom-mate
+ExecStart=/home/ubuntu/boheom-mate/.venv/bin/python apply_approved.py

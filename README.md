@@ -104,7 +104,11 @@ cp .env.example .env          # .env에 OpenAI API 키 입력
 .venv/bin/python tests/test_calculator.py                        # 계산기 테스트 (손으로 계산한 20개 사례)
 ```
 
-앱의 "약관 넣기" 탭에서 PDF를 고르고 저장하면 질문할 수 있습니다.
+앱의 "약관 넣기" 탭에서 PDF를 고르고 저장하면 질문할 수 있습니다. (로컬에서 `.env`에 `SHOW_INGEST_TAB=1`을 넣었을 때만 보입니다.)
+
+배포 서버에서는 **주간 약관 확인**이 약관을 넣습니다. 매주 월요일 9시에 보험사 공시실에서 판매 중인 실손 약관을 확인해 새 약관을 받고,
+조항 나누기를 자동 점검해 Slack에 올립니다. 운영자가 Slack에서 "승인" 답글을 달면 5분 안에 사이트에 반영됩니다.
+설정 방법은 [`docs/slack-setup.md`](docs/slack-setup.md)에 있습니다.
 
 ## 파일 구성
 
