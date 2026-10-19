@@ -38,7 +38,12 @@ img[data-testid="stHeaderLogo"] { height: 3rem; max-width: none; }  /* 기본 32
 st.markdown("#### 실손보험, 보장되는지 얼마 받는지 바로 알려 드려요")
 st.caption("가입한 보험의 약관을 근거로 답하고, 영수증 금액으로 예상 보험금을 계산해요.")
 
-tab_questions, tab_ingest = st.tabs(["상담하기", "약관 넣기"])
+# 약관 넣기는 운영자용이다. 배포판에서는 주간 약관 확인(Slack 승인)이 넣으므로, 로컬에서 SHOW_INGEST_TAB=1일 때만 보인다
+SHOW_INGEST = os.getenv("SHOW_INGEST_TAB") == "1"
+if SHOW_INGEST:
+    tab_questions, tab_ingest = st.tabs(["상담하기", "약관 넣기"])
+else:
+    (tab_questions,) = st.tabs(["상담하기"])
 
 DEFAULT_SOURCE = chat.CALCULATOR_SOURCE  # 첫 방문 때 미리 색인을 만들 약관
 DAILY_LIMIT = int(os.getenv("DAILY_QUESTION_LIMIT", "100"))  # 모든 방문자를 합친 하루 질문 수
@@ -253,5 +258,6 @@ def render_ingest():
             st.success(f"{len(articles)}개 조항을 저장했습니다. DB 전체 {total}개")
 
 
-with tab_ingest:
-    render_ingest()
+if SHOW_INGEST:
+    with tab_ingest:
+        render_ingest()
