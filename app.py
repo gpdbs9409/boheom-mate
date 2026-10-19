@@ -127,6 +127,10 @@ def pick_product(sources):
         if col_new.button("새 대화", width="stretch"):
             st.session_state.session_id = uuid.uuid4().hex
             st.rerun()
+        # 실손은 가입한 시점의 약관이 적용되므로, 판이 여러 개면 가입한 판을 고르게 한다
+        versions = products.editions(product)
+        if len(versions) > 1:
+            product = st.selectbox("약관 판 (가입한 시점)", versions, format_func=lambda e: f'{e["edition"]}판')
     if product["source"] not in sources:
         st.info(f"'{product['name']}' 약관은 아직 준비 중이에요. 준비된 상품을 골라 주세요.")
         return None
