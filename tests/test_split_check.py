@@ -6,9 +6,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import ingest
-import split_check
-from split_check import check
+from boheom_mate.core import ingest
+from boheom_mate.jobs import split_check
+from boheom_mate.jobs.split_check import check
 
 
 def a(section, no):

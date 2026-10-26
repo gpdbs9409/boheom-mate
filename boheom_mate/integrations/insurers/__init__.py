@@ -22,9 +22,12 @@ class Listing:
     category: str = "실손의료보험"
 
 
-from insurers import kb  # noqa: E402  (Listing을 먼저 정의해야 한다)
+from boheom_mate.integrations.insurers import kb  # noqa: E402  (Listing을 먼저 정의해야 한다)
 
 # 자동으로 확인하는 보험사
 ENABLED = {kb.COMPANY: kb}
-# 자동 확인 불가(자동 접근 금지, 브라우저 필요 등): 운영자가 PDF를 data/inbox/에 직접 넣는다
-MANUAL = []
+# 자동 확인 불가(자동 접근 금지, 브라우저 필요 등): 운영자가 PDF를 data/inbox/에 직접 넣는다.
+# - 삼성화재: 공시실을 JavaScript로 그려서(requests로 목록을 읽지 못함)
+# - 현대해상: 자동 접근을 막음(요청이 연결되지 않음)
+# - DB손해보험: 공시실을 JavaScript로 그려서(빈 HTML 껍데기만 응답)
+MANUAL = ["삼성화재", "현대해상", "DB손해보험"]

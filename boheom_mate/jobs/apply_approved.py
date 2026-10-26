@@ -5,15 +5,15 @@
 사이트를 멈추는 이유: 사이트(Streamlit)와 이 스크립트가 같은 Chroma 파일에 동시에 쓰지 않게 하려는 것이다.
 승인된 약관이 없으면 아무것도 하지 않는다.
 
-실행: .venv/bin/python apply_approved.py
+실행: .venv/bin/python -m boheom_mate.jobs.apply_approved
 """
 import subprocess
 from pathlib import Path
 
-import ingest
-import products
-import sync_state
-from slack_notify import Slack
+from boheom_mate.core import ingest
+from boheom_mate.store import products
+from boheom_mate.store import sync_state
+from boheom_mate.integrations.slack_notify import Slack
 
 SERVICE = "boheom-mate"
 

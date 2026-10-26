@@ -5,7 +5,7 @@
 3) 조항을 나눠 점검하고, Slack에 주간 요약 1건과 약관별 메시지를 올린다
 DB에는 넣지 않는다. 운영자가 Slack에서 "승인"하면 apply_approved.py가 넣는다.
 
-실행: .venv/bin/python weekly_check.py
+실행: .venv/bin/python -m boheom_mate.jobs.weekly_check
 """
 import re
 import shutil
@@ -13,12 +13,12 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import ingest
-import insurers
-import split_check
-import sync_state
-from insurers import ListingError
-from slack_notify import Slack, item_message, summary_message
+from boheom_mate.core import ingest
+from boheom_mate.integrations import insurers
+from boheom_mate.jobs import split_check
+from boheom_mate.store import sync_state
+from boheom_mate.integrations.insurers import ListingError
+from boheom_mate.integrations.slack_notify import Slack, item_message, summary_message
 
 INBOX = ingest.DATA_DIR / "inbox"
 INBOX_NAME = re.compile(r"^(.+?)__(.+)__(\d{2}\.\d{2})$")

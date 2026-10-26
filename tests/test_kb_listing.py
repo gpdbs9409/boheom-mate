@@ -7,9 +7,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-import products
-from insurers import Listing, ListingError
-from insurers import kb
+from boheom_mate.store import products
+from boheom_mate.integrations.insurers import Listing, ListingError
+from boheom_mate.integrations.insurers import kb
 
 FIX = ROOT / "tests" / "fixtures"
 

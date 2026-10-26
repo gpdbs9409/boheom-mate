@@ -3,13 +3,14 @@
 data/ 폴더의 약관 PDF를 읽어 "제○조" 단위로 자르고,
 OpenAI로 임베딩해 chroma_db/에 저장한다.
 
-화면 없이 실행하려면:  python ingest.py
+화면 없이 실행하려면:  python -m boheom_mate.core.ingest
 """
 import os
 import re
 from pathlib import Path
 
-BASE_DIR = Path(__file__).parent
+# boheom_mate/core/ingest.py → 프로젝트 루트는 두 단계 위(core → boheom_mate → 루트)
+BASE_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = BASE_DIR / "data"
 DB_DIR = BASE_DIR / "chroma_db"
 COLLECTION_NAME = "yakgwan"

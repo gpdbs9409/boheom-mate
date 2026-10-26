@@ -5,7 +5,7 @@
 """
 import re
 
-import ingest
+from boheom_mate.core import ingest
 
 # 조각 수가 이보다 적으면 잘못 잘렸다고 본다. KB 실손 약관 5개 중 가장 적은 것(간편가입 223조각)의 절반
 MIN_ARTICLES = 110

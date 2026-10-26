@@ -10,7 +10,8 @@ import os
 import re
 from pathlib import Path
 
-BASE_DIR = Path(__file__).parent
+# boheom_mate/store/products.py → 프로젝트 루트는 두 단계 위(store → boheom_mate → 루트)
+BASE_DIR = Path(__file__).resolve().parents[2]
 SEED_FILE = BASE_DIR / "products_seed.json"
 DATA_FILE = BASE_DIR / "state" / "products.json"
 

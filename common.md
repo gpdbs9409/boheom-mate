@@ -87,6 +87,7 @@ Claude Code, Codex, Kiro 등 모든 AI 에이전트가 이 문서를 공통으�
 설계: `docs/superpowers/specs/2026-10-19-weekly-yakgwan-sync-design.md`, 계획: `docs/superpowers/plans/2026-10-19-weekly-yakgwan-sync.md`.
 
 - `weekly_check.py`(월 09:00 KST, `deploy/weekly-check.timer`): `insurers/`의 보험사별 모듈이 공시실에서 판매 중 실손 약관을 읽고, 처음 보는 약관(회사+상품+판, `sync_state.key`)을 `data/`에 받고, `split_check.check`로 점검해 Slack에 올린다. `data/inbox/`의 `보험사__상품__판.pdf`도 처리한다.
+- 보험사 등록(`insurers/__init__.py`): `ENABLED`는 자동 수집 가능한 보험사(현재 KB손해보험만. 공시실이 서버에서 HTML을 그려 줘서 `requests`로 목록을 읽을 수 있다). `MANUAL`은 자동 수집이 불가능한 보험사(삼성화재·현대해상·DB손해보험). 삼성·DB는 공시실을 JavaScript로 그려서 `requests`로는 빈 껍데기만 오고, 현대는 자동 접근을 막는다(연결 실패). 이들은 운영자가 공시실에서 PDF를 받아 `data/inbox/`에 `보험사__상품__판.pdf`(예: `삼성화재__무배당실손__26.10.pdf`)로 넣으면 주간 확인이 나머지(분할·점검·Slack·승인·DB 저장)를 처리한다. 브라우저 자동화(Selenium/Playwright)는 의존성·유지보수·공시실 접근 정책 때문에 쓰지 않기로 했다.
 - `apply_approved.py`(5분마다): 운영자(`SLACK_OPERATOR_ID`)가 약관 메시지에 정확히 "승인" 답글을 달면 사이트를 멈추고 `ingest.build_index` → `products.add` → 사이트 시작.
 - 상품 목록은 `state/products.json`(없으면 `products_seed.json`). 판마다 항목 하나, 옛 판은 지우지 않고 화면에서 판을 고른다.
 - 배포판에서는 "약관 넣기" 탭이 숨겨진다(로컬은 `.env`에 `SHOW_INGEST_TAB=1`).

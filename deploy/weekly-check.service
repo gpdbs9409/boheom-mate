@@ -6,4 +6,4 @@ After=network-online.target
 Type=oneshot
 User=ubuntu
 WorkingDirectory=/home/ubuntu/boheom-mate
-ExecStart=/home/ubuntu/boheom-mate/.venv/bin/python weekly_check.py
+ExecStart=/home/ubuntu/boheom-mate/.venv/bin/python -m boheom_mate.jobs.weekly_check

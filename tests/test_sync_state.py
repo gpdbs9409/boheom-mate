@@ -8,8 +8,8 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import sync_state
-from sync_state import key
+from boheom_mate.store import sync_state
+from boheom_mate.store.sync_state import key
 
 # 판 표시와 띄어쓰기가 달라도 같은 약관
 assert key("A", "KB 실손(26.09)", "26.09") == key("A", "KB실손", "26.09")

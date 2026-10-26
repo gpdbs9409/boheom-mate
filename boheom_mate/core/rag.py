@@ -7,8 +7,8 @@ import chromadb
 from dotenv import load_dotenv
 from openai import OpenAI
 
-import glossary
-import ingest
+from boheom_mate.core import glossary
+from boheom_mate.core import ingest
 
 ANSWER_MODEL = "gpt-5.4-mini"
 TOP_K = 8
@@ -189,7 +189,7 @@ def search(question, source, k=TOP_K, debug=None):
     3. 의미 검색(벡터) 2개와 키워드 검색(BM25) 1개의 순위를 RRF로 합친다.
        여러 검색에서 고르게 상위권인 조각이 1등이 된다.
     """
-    import keyword_search
+    from boheom_mate.core import keyword_search
 
     question = " ".join(question.split())
     analysis = analyze_question(question)
@@ -259,7 +259,7 @@ def _required_chunks(title_prefixes, source, embeddings, keyword_tokens, found):
     해당 조항의 조각들만 놓고 의미 검색 순위와 키워드 검색 순위를 RRF로 합쳐 1등을 고른다.
     전체 검색에서 받은 점수(found)가 있으면 그 점수를 쓰고, 없으면 0으로 둔다(맨 뒤로 정렬).
     """
-    import keyword_search
+    from boheom_mate.core import keyword_search
 
     data = _collection().get(where={"source": source}, include=["metadatas"])
     titles = sorted({

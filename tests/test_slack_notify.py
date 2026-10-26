@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from slack_notify import Slack, item_message, summary_message
+from boheom_mate.integrations.slack_notify import Slack, item_message, summary_message
 
 
 class FakeClient:

@@ -84,7 +84,7 @@ class BM25:
 @lru_cache(maxsize=10)
 def build_index(source, doc_count):
     """상품별 BM25 색인. doc_count가 바뀌면(약관을 다시 넣으면) 새로 만든다."""
-    import rag
+    from boheom_mate.core import rag
 
     data = rag._collection().get(where={"source": source}, include=["documents", "metadatas"])
     texts = [
@@ -96,7 +96,7 @@ def build_index(source, doc_count):
 
 def search(query_tokens, source, k):
     """BM25 점수 상위 k개 조각. 반환값: [(id, 문서, 메타데이터, 점수), ...]"""
-    import rag
+    from boheom_mate.core import rag
 
     count = len(rag._collection().get(where={"source": source}, include=[])["ids"])
     ids, docs, metas, index = build_index(source, count)

@@ -9,9 +9,10 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-import products
+from boheom_mate.store import products
 
-STATE_DIR = Path(__file__).parent / "state"
+# boheom_mate/store/sync_state.py → 프로젝트 루트는 두 단계 위(store → boheom_mate → 루트)
+STATE_DIR = Path(__file__).resolve().parents[2] / "state"
 STATE_FILE = STATE_DIR / "sync.json"
 LOG_FILE = STATE_DIR / "runs.log"
 

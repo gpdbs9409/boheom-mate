@@ -8,10 +8,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import sync_state
-import weekly_check
-from insurers import Listing, ListingError
-from weekly_check import pdf_name
+from boheom_mate.store import sync_state
+from boheom_mate.jobs import weekly_check
+from boheom_mate.integrations.insurers import Listing, ListingError
+from boheom_mate.jobs.weekly_check import pdf_name
 
 
 class FakeSlack:

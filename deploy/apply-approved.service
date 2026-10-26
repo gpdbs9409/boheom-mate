@@ -6,4 +6,4 @@ After=network-online.target
 Type=oneshot
 User=ubuntu
 WorkingDirectory=/home/ubuntu/boheom-mate
-ExecStart=/home/ubuntu/boheom-mate/.venv/bin/python apply_approved.py
+ExecStart=/home/ubuntu/boheom-mate/.venv/bin/python -m boheom_mate.jobs.apply_approved

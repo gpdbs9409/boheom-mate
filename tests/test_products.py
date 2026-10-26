@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import products
+from boheom_mate.store import products
 
 items = [
     {"company": "KB손해보험", "category": "실손의료보험", "product": "A", "edition": "26.09", "source": "a1.pdf"},

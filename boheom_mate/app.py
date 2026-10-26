@@ -4,7 +4,7 @@
   (대화는 지금 브라우저 세션 것만 보이고, 새로고침하면 새 대화가 된다. 하루 전체 질문 수에 한도가 있다)
 - 약관 넣기: 기능 1
 
-실행:  streamlit run app.py
+실행:  streamlit run boheom_mate/app.py
 """
 import os
 import threading
@@ -13,14 +13,15 @@ import uuid
 import pandas as pd
 import streamlit as st
 
-import chat
-import display
-import ingest
-import keyword_search
-import products
-import question_store
-import rag
+from boheom_mate.ui import chat
+from boheom_mate.ui import display
+from boheom_mate.core import ingest
+from boheom_mate.core import keyword_search
+from boheom_mate.store import products
+from boheom_mate.store import question_store
+from boheom_mate.core import rag
 
+# streamlit은 프로젝트 루트에서 실행하므로(WorkingDirectory=루트) 자산 경로는 CWD 기준 그대로 둔다
 LOGO_TEXT = "assets/logo_text.svg"
 LOGO_CHARACTER = "assets/logo_character.svg"
 

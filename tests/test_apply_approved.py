@@ -7,9 +7,9 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import apply_approved
-import products
-import sync_state
+from boheom_mate.jobs import apply_approved
+from boheom_mate.store import products
+from boheom_mate.store import sync_state
 
 
 class FakeSlack:

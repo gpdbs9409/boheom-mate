@@ -8,8 +8,8 @@ import re
 import time
 from pathlib import Path
 
-from insurers import TIMEOUT, USER_AGENT, Listing, ListingError
-from products import base_name
+from boheom_mate.integrations.insurers import TIMEOUT, USER_AGENT, Listing, ListingError
+from boheom_mate.store.products import base_name
 
 COMPANY = "KB손해보험"
 BASE_URL = "https://www.kbinsure.co.kr"

@@ -10,8 +10,8 @@ LangChain 없이 OpenAI 도구 호출(tool calling)로 직접 구현했다.
 """
 import json
 
-import calculator
-import rag
+from boheom_mate.core import calculator
+from boheom_mate.core import rag
 
 CALCULATOR_SOURCE = "KB_실손의료비보장보험_26.09_약관.pdf"  # 계산기 공식은 기본 약관에서 옮겼다
 MAX_TOOL_ROUNDS = 4
