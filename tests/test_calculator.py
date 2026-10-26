@@ -34,16 +34,56 @@ CASES = [
 ]
 
 
+# 방문 횟수(visits): 통원 공제는 방문 1건당 뗀다
+VISIT_CASES = [
+    # 의원 비급여 통원 15만 원을 3번 나눠 방문(회당 5만) → 회당 max(5만, 2.5만)=5만 공제 → 회당 0원 → 총 0
+    ("비급여 통원 15만(3회 방문) → 회당 5만, 공제 5만 → 0원",
+     dict(care="통원", hospital="의원", non_covered=150000, visits=3), 0),
+    # 같은 15만을 1번 방문 → 15만 − max(5만, 7.5만)=7.5만 → 7.5만
+    ("비급여 통원 15만(1회 방문) → 15만 − 7.5만",
+     dict(care="통원", hospital="의원", non_covered=150000, visits=1), 75000),
+    # 급여 통원 의원 9만을 3번(회당 3만) → 회당 max(1만, 6천)=1만 공제 → 회당 2만 × 3 = 6만
+    ("급여 통원 9만(3회 방문) → 회당 3만−1만=2만 × 3",
+     dict(care="통원", hospital="의원", covered_copay=90000, visits=3), 60000),
+    # 입원은 visits 무시: 급여 입원 100만 × 80% (visits 넣어도 동일)
+    ("입원은 visits 무시: 급여 입원 100만 → 80%",
+     dict(care="입원", hospital="종합병원", covered_copay=1000000, visits=5), 800000),
+]
+
+
 def main():
     failed = 0
-    for desc, kwargs, expected in CASES:
+    for desc, kwargs, expected in CASES + VISIT_CASES:
         got = c.calculate(**kwargs)["total"]
         ok = got == expected
         failed += not ok
         print(f"{'OK ' if ok else 'FAIL'} {desc}: {got:,} (기대 {expected:,})")
+
+    # 세대 경고: 최신 외 세대는 참고 상한 경고가 notes에 들어간다
+    for gen in ("1세대", "2세대", "3세대"):
+        notes = c.calculate(care="통원", hospital="의원", covered_copay=15000, generation=gen)["notes"]
+        if any("참고 상한" in n for n in notes):
+            print(f"OK  {gen} 경고 표시됨")
+        else:
+            print(f"FAIL {gen} 경고 없음"); failed += 1
+    # 최신 세대(4세대)는 참고 상한 경고가 없다
+    notes4 = c.calculate(care="통원", hospital="의원", covered_copay=15000, generation="4세대")["notes"]
+    if any("참고 상한" in n for n in notes4):
+        print("FAIL 4세대에 불필요한 경고"); failed += 1
+    else:
+        print("OK  4세대는 참고 상한 경고 없음")
+    # 중복가입(비례보상) 안내
+    notes_dup = c.calculate(care="통원", hospital="의원", covered_copay=15000, has_other_insurance=True)["notes"]
+    if any("비례보상" in n for n in notes_dup):
+        print("OK  중복가입 비례보상 안내됨")
+    else:
+        print("FAIL 중복가입 안내 없음"); failed += 1
     for bad in (dict(care="왕진", hospital="의원"), dict(care="통원", hospital="약국"),
                 dict(care="통원", hospital="의원", covered_copay=-1),
-                dict(care="입원", hospital="의원", room_fee=100000)):
+                dict(care="입원", hospital="의원", room_fee=100000),
+                dict(care="통원", hospital="의원", visits=0),
+                dict(care="통원", hospital="의원", covered_copay=10000, visits=-2),
+                dict(care="통원", hospital="의원", generation="5세대")):
         try:
             c.calculate(**bad)
             print(f"FAIL 잘못된 입력을 막지 못함: {bad}"); failed += 1
