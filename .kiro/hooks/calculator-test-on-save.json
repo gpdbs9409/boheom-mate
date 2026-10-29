@@ -1,0 +1,14 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "계산기 저장 시 테스트",
+      "trigger": "PostFileSave",
+      "matcher": "boheom_mate/core/calculator\\.py$",
+      "action": {
+        "type": "command",
+        "command": ".venv/bin/python tests/test_calculator.py"
+      }
+    }
+  ]
+}

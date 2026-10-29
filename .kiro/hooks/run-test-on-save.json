@@ -1,0 +1,14 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "테스트 파일 저장 시 실행",
+      "trigger": "PostFileSave",
+      "matcher": "tests/test_.*\\.py$",
+      "action": {
+        "type": "command",
+        "command": ".venv/bin/python \"$KIRO_FILE_PATH\""
+      }
+    }
+  ]
+}
