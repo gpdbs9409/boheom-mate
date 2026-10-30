@@ -5,7 +5,7 @@
 에이전트가 턴마다 **할 일을 스스로 판단해 도구를 호출**합니다. 약관을 검색해 근거와 함께 답하거나,
 약관에서 뽑은 기준으로 보험금을 계산하거나, 정보가 모자라면 되묻습니다.
 대화에서 들은 가입 시기·병원 종류 같은 정보는 **세션 메모리**에 남겨 다음 턴에 다시 묻지 않습니다.
-답변 오류 신고처럼 밖으로 보내는 일은 **MCP 클라이언트**로 GitHub(Slack은 준비 중) MCP 서버의 도구를 부르되, 사용자가 미리보기를 확인한 뒤에만 보냅니다.
+답변 오류 신고처럼 밖으로 보내는 일은 **MCP 클라이언트**로 GitHub·Slack MCP 서버의 도구를 부르되, 사용자가 미리보기를 확인한 뒤에만 보냅니다.
 약관 검색·계산 도구는 **MCP 서버**로도 내보내 다른 에이전트가 쓸 수 있습니다.
 약관에서 근거를 찾지 못하면 지어내지 않고 "약관에서 확인할 수 없다"고 답합니다.
 
@@ -49,7 +49,7 @@ flowchart TD
     T1 --> A
     T2 --> A
     T3 --> CONF["화면 미리보기<br/>사용자가 고치고 동의 → 보내기"]
-    CONF -->|MCP 클라이언트| EXT["GitHub MCP: 이슈 만들기<br/>Slack MCP: 상담 요청(준비 중)"]
+    CONF -->|MCP 클라이언트| EXT["GitHub MCP: 이슈 만들기<br/>Slack MCP: 상담 요청"]
     A --> OUT[답변 + 근거 원문 + 계산표]
     OUT -->|이번 턴에서 들은 사실| M
 
@@ -166,9 +166,11 @@ LangChain 기본 설정(글자 수 청킹 + 벡터 검색)은 같은 평가셋�
 | 기능 | MCP 서버 | 쓰는 도구 | 상태 |
 |---|---|---|---|
 | 답변 오류 신고 → 이슈 등록 | [GitHub 공식 MCP 서버](https://github.com/github/github-mcp-server) (원격, PAT) | `issue_write` (method=create) | `.env`에 `GITHUB_MCP_TOKEN`, `GITHUB_ISSUE_REPO`를 넣으면 켜짐 |
-| 설계사에게 상담 요청 전달 | [Slack 공식 MCP 서버](https://docs.slack.dev/ai/slack-mcp-server/) (`mcp.slack.com/mcp`) | 메시지 보내기 | 구현 완료, 꺼 둠. MCP를 켠 Slack 내부 앱의 사용자 토큰(chat:write)이 필요해 `SERVERS`에서 주석 처리 |
+| 설계사에게 상담 요청 전달 | [Slack 공식 MCP 서버](https://docs.slack.dev/ai/slack-mcp-server/) (`mcp.slack.com/mcp`) | 메시지 보내기 | `.env`에 `SLACK_MCP_USER_TOKEN`(MCP를 켠 Slack 앱의 사용자 토큰, chat:write), `SLACK_HANDOFF_CHANNEL_ID`를 넣으면 켜짐 |
 
 - 설정(.env)이 없는 행동은 에이전트 도구에도 화면에도 나오지 않습니다. 그래서 키가 없으면 기존 상담과 똑같이 동작합니다.
+- 키를 넣은 뒤 `.venv/bin/python -m boheom_mate.integrations.mcp_client --check`로 연결과 보내기 도구를 확인할 수 있습니다(아무것도 보내지 않음).
+- 서버마다 도구 이름·입력 칸 이름이 조금 달라도 정해 둔 후보(이슈 만들기·메시지 보내기 도구만)에서 찾아 맞춥니다.
 - GitHub 토큰은 대상 저장소 하나에 Issues 쓰기 권한만 준 fine-grained PAT를 권장합니다.
 - 테스트는 공식 서버와 같은 이름의 도구를 가진 가짜 MCP 서버(stdio)로 합니다. 허용 목록 밖 도구 거절, 보낼 곳 고정,
   토큰이 오류 메시지에 나오지 않는지를 확인합니다(`tests/test_mcp_client.py`).
@@ -239,7 +241,7 @@ boheom_mate/
 │   ├── products.py        보험사·상품·판 목록
 │   └── sync_state.py      주간 확인 상태
 ├── integrations/
-│   ├── mcp_client.py      MCP 클라이언트: 서버별 허용 도구 1개, 보낼 곳 고정 (GitHub, Slack)
+│   ├── mcp_client.py      MCP 클라이언트: 행동별 허용 도구(보내기·이슈 만들기만), 보낼 곳 고정 (GitHub, Slack)
 │   ├── slack_notify.py    Slack 알림과 승인 읽기
 │   └── insurers/          보험사 공시실 모듈 (자동 / 수동 보험사 등록)
 └── jobs/
