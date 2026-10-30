@@ -13,9 +13,11 @@ import json
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from boheom_mate.core import calculator
+from boheom_mate.core import memory as session_memory
+from boheom_mate.core import policy_rules
 from boheom_mate.core import rag
 
-CALCULATOR_SOURCE = "KB_실손의료비보장보험_26.09_약관.pdf"  # 계산기 공식은 기본 약관에서 옮겼다
+CALCULATOR_SOURCE = "KB_실손의료비보장보험_26.09_약관.pdf"  # 기본 상품(첫 화면, 평가에서 쓰는 약관)
 MAX_TOOL_ROUNDS = 4
 HISTORY_TURNS = 12  # GPT에 보내는 최근 메시지 수
 
@@ -42,6 +44,8 @@ BASE_PROMPT = """당신은 '보험메이트', 실손의료보험 약관 상담 �
   1~3세대라고 하면 generation에 그 값을 넣으세요. 지금은 최신 기준 '참고 상한'만 제공되며 실제와 차이가 큽니다.
 - 통원 금액이 여러 번 방문의 합계면 방문 횟수(visits)를 물어 함께 넣으세요. 공제는 방문 1건당 뗍니다.
 - 실손을 2개 이상 가입했다고 하면 has_other_insurance=true로 넣으세요(비례보상 안내).
+- 사용자가 가입 시기(연도·월)를 말했으면 joined_year, joined_month에 넣고 generation은 직접 정하지 마세요.
+  세대는 코드가 가입 시기로 정합니다. [이 대화에서 기억하는 정보]에 가입 세대가 있으면 그 값을 generation에 넣으세요.
 - 낸 금액은 영수증의 '급여 본인부담금'과 '비급여' 칸에 있다고 알려 주세요.
   사용자가 "도수치료 10만 원"처럼 대략 말하면 그 금액으로 계산하세요(도수치료·주사·MRI는 해당 칸에).
 - 암, 뇌혈관·심장 질환, 희귀·난치 질환 같은 중증 질환 치료라고 말하지 않았으면 severe=false로 계산하세요.
@@ -100,8 +104,10 @@ CALCULATE_TOOL = {
                 "room_days": {"type": "integer", "description": "입원 일수(1·2인실 비용이 있을 때)"},
                 "visits": {"type": "integer", "description": "통원 방문 횟수. 금액이 여러 번 방문의 합계면 그 횟수. 모르면 1"},
                 "generation": {"type": "string", "enum": ["1세대", "2세대", "3세대", "4세대"],
-                               "description": "가입 세대. 1세대: 2009.10 이전, 2세대: ~2017.3, 3세대: ~2021.6, 4세대: 2021.7 이후"},
+                               "description": "가입 세대. 1세대: 2009년 9월까지, 2세대: 2009년 10월~2017년 3월, 3세대: 2017년 4월~2021년 6월, 4세대: 2021년 7월부터"},
                 "has_other_insurance": {"type": "boolean", "description": "실손보험을 2개 이상 가입했는지"},
+                "joined_year": {"type": "integer", "description": "사용자가 말한 실손 가입 연도. 말했으면 generation 대신 이 값을 넣는다"},
+                "joined_month": {"type": "integer", "description": "사용자가 말한 실손 가입 월(1~12). 모르면 넣지 않는다"},
             },
             "required": ["care", "hospital"],
         },
@@ -109,11 +115,20 @@ CALCULATE_TOOL = {
 }
 
 
-def _system_prompt(source):
-    if source == CALCULATOR_SOURCE:
+def calculator_available(source):
+    """이 상품 약관에서 계산에 필요한 값을 모두 뽑고 원문으로 검증했으면 True."""
+    try:
+        return policy_rules.load(source) is not None
+    except Exception:
+        return False
+
+
+def _system_prompt(source, can_calculate):
+    if can_calculate:
         note = ""
     else:
-        note = "- 이 상품은 계산기를 지원하지 않습니다. 금액 질문에는 약관 내용만 안내하고, 계산은 기본형 상품에서만 된다고 알려 주세요.\n"
+        note = ("- 이 상품은 약관에서 계산에 필요한 값을 확인하지 못해 계산기를 쓸 수 없습니다. "
+                "금액 질문에는 약관 내용만 안내하세요.\n")
     return BASE_PROMPT.format(calculator_note=note) + (PLAIN_RULES if PLAIN_LANGUAGE else "")
 
 
@@ -143,22 +158,38 @@ def _run_search(args, source, turn):
     }
 
 
-def _run_calculate(args, turn):
+def _run_calculate(args, source, turn):
+    """계산 값은 이 상품 약관에서 뽑아 검증한 것을 쓰고, 계산에 쓴 약관 구절을 근거로 붙인다."""
+    rules = policy_rules.load(source)
     inputs = {k: v for k, v in args.items() if v is not None}
-    result = calculator.calculate(**inputs)
+    # 가입 시기를 말했으면 세대는 GPT가 아니라 코드가 정한다(경계 연도에 월을 모르면 세대를 비워 둔다)
+    year, month = inputs.pop("joined_year", None), inputs.pop("joined_month", None)
+    if year is not None:
+        generation = session_memory.generation_of(year, month)
+        if generation:
+            inputs["generation"] = generation
+        else:
+            inputs.pop("generation", None)
+    result = calculator.calculate(**inputs, rules=rules["values"], articles=rules["articles"])
     turn["calculation"] = {**result, "inputs": inputs}
-    return result
+    for e in policy_rules.evidence(rules, result["rules_used"]):
+        if e not in turn["evidence"]:
+            turn["evidence"].append(e)
+    return {k: v for k, v in result.items() if k != "rules_used"}
 
 
-def reply(history, source):
+def reply(history, source, memory=None):
     """history: [{"role": "user"|"assistant", "content": str, "calculation": dict|None}, ...] (마지막이 사용자 질문)
+    memory: 이 대화의 상담 메모(core.memory). 프롬프트에 넣어 이미 말한 정보를 다시 묻지 않게 한다
 
     반환값: {"content": 답변, "evidence": [조항], "calculation": 계산 결과|None,
              "summary": 질문 요지|None, "searches": [GPT가 검색한 질문]}
     """
-    tools = [SEARCH_TOOL] + ([CALCULATE_TOOL] if source == CALCULATOR_SOURCE else [])
+    can_calculate = calculator_available(source)
+    tools = [SEARCH_TOOL] + ([CALCULATE_TOOL] if can_calculate else [])
     llm = rag._llm.bind_tools(tools)
-    messages = [SystemMessage(content=_system_prompt(source))] + _model_history(history)
+    system = _system_prompt(source, can_calculate) + session_memory.prompt_block(memory)
+    messages = [SystemMessage(content=system)] + _model_history(history)
     turn = {"evidence": [], "calculation": None, "summary": None, "searches": []}
 
     for _ in range(MAX_TOOL_ROUNDS):
@@ -174,7 +205,7 @@ def reply(history, source):
                 if call["name"] == "search_terms":
                     output = _run_search(args, source, turn)
                 elif call["name"] == "calculate_payout":
-                    output = _run_calculate(args, turn)
+                    output = _run_calculate(args, source, turn)
                 else:
                     output = {"error": f"없는 도구: {call['name']}"}
             except (ValueError, TypeError) as e:  # 잘못된 값이면 GPT가 고쳐서 다시 부르거나 사용자에게 묻게 한다
