@@ -37,7 +37,8 @@ ARTICLE_PATTERN = re.compile(
 # 약관 안의 큰 구역. 같은 "제3조"라도 보통약관과 특약1, 특약2에 각각 따로 있어서
 # 어느 구역의 조항인지 꼬리표를 붙여야 검색과 화면 표시가 헷갈리지 않는다.
 # 보통약관이 시작되기 전(표지, 목차, 약관 이용 가이드)은 모두 "안내자료"로 본다.
-MAIN_START = re.compile(r"^기본형 실손의료보험", re.MULTILINE)
+# 간편가입(유병력자) 약관은 "기본형 간편가입 실손의료보험"으로 시작한다
+MAIN_START = re.compile(r"^기본형 (간편가입 )?실손의료보험", re.MULTILINE)
 SECTION_PATTERNS = [
     (re.compile(r"^\d\.\s*(특별약관\d\([^)\n]+\))", re.MULTILINE), lambda m: m.group(1)),
     # 제도성 특약은 "1. 이륜자동차 운전중 상해 부담보" 바로 다음 줄에 제1조가 온다

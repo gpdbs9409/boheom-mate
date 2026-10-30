@@ -7,13 +7,16 @@ SQLite 파일(questions.db) 하나에 저장하므로 앱을 다시 켜도 남�
 """
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 # boheom_mate/store/question_store.py → 프로젝트 루트는 두 단계 위(store → boheom_mate → 루트)
 DB_PATH = Path(__file__).resolve().parents[2] / "questions.db"
 KST = ZoneInfo("Asia/Seoul")  # 서버(EC2)는 UTC라서 날짜를 한국 시간으로 맞춘다
+# 상담 메모에는 병명 같은 민감정보가 들어갈 수 있어, 한 대화 이상 남기지 않는다.
+# 새로고침으로 버려진 세션의 메모도 이 시간이 지나면 지운다.
+MEMORY_TTL_HOURS = 24
 
 
 def _connect():
@@ -89,6 +92,7 @@ def get_memory(session_id):
 
 
 def save_memory(session_id, memory):
+    purge_old_memory()
     with _connect() as conn:
         conn.execute(
             """INSERT INTO session_memory (session_id, memory, updated_at) VALUES (?, ?, ?)
@@ -100,6 +104,13 @@ def save_memory(session_id, memory):
 def clear_memory(session_id):
     with _connect() as conn:
         conn.execute("DELETE FROM session_memory WHERE session_id = ?", (session_id,))
+
+
+def purge_old_memory(hours=MEMORY_TTL_HOURS, now=None):
+    """마지막으로 바뀐 지 hours시간이 지난 상담 메모를 지우고, 지운 개수를 반환한다."""
+    cutoff = ((now or _now()) - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M")
+    with _connect() as conn:
+        return conn.execute("DELETE FROM session_memory WHERE updated_at < ?", (cutoff,)).rowcount
 
 
 def use_daily_quota(limit):

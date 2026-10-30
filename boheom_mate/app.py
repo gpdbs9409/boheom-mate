@@ -138,6 +138,7 @@ def pick_product(sources):
         col_product, col_new = st.columns([4, 1], vertical_alignment="bottom")
         product = col_product.selectbox(f"보험 상품 ({len(found)}개)", found, format_func=products.label)
         if col_new.button("새 대화", width="stretch"):
+            question_store.clear_memory(st.session_state.session_id)  # 화면 안내대로 이전 대화의 기억을 지운다
             st.session_state.session_id = uuid.uuid4().hex
             st.rerun()
         # 실손은 가입한 시점의 약관이 적용되므로, 판이 여러 개면 가입한 판을 고르게 한다
@@ -168,7 +169,7 @@ def render_questions():
     if remembered:
         with st.expander(f"이 대화에서 기억하는 내용 ({len(remembered)}개)"):
             st.markdown("\n".join(f"- {line}" for line in remembered))
-            st.caption("이 대화 안에서만 기억하고, 새 대화를 시작하면 지워져요.")
+            st.caption("이 대화 안에서만 기억하고, 새 대화를 시작하거나 하루가 지나면 지워져요.")
             if st.button("기억 지우기"):
                 question_store.clear_memory(session_id)
                 st.rerun()
