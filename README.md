@@ -19,9 +19,7 @@
 |---|---|
 | ![상담 시작](docs/images/01_home.png) | ![약관 근거 답변](docs/images/02_answer.png) |
 
-| 근거 원문 (핵심 문장만 강조) | 도구 3: 외부로 보내기 | 답변 오류 신고·설계사 상담 요청 초안을 만들고, 사용자가 확인하면 MCP 서버의 도구 하나로 보낸다 | `integrations/mcp_client.py`(`langchain-mcp-adapters`), `core/outbound.py` |
-| MCP 서버 | 약관 검색·보험금 계산을 다른 MCP 클라이언트(Kiro, Claude Desktop 등)에서 쓰게 내보낸다 | `mcp_server.py`(`mcp` FastMCP, 읽기 전용) |
-| 세션 메모리 |
+| 근거 원문 (핵심 문장만 강조) | 세션 메모리 |
 |---|---|
 | ![근거 원문](docs/images/03_evidence.png) | ![세션 메모리](docs/images/05_memory.png) |
 
