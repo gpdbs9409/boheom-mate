@@ -152,14 +152,22 @@ def split_articles(text):
     return articles, skipped
 
 
+# 면책 조항처럼 "1. 2. 3." / "가. 나." / "① ②" 항목이 나열되는 조항은 항목 경계에서 끊어야
+# 서로 다른 항목(예: 치과, 임신, 비만)이 한 조각에 섞이지 않는다. 줄 맨 앞의 항목 번호를 찾는다.
+ITEM_START = re.compile(r"^\s*(\d{1,2}\.|[가-힣]\.|[①-⑳]|[(（]\d{1,2}[)）])\s")
+
+
 def _split_long(article):
-    """CHUNK_CHARS보다 긴 조항을 줄 단위로 나눈다. 두 번째 조각부터는 조항 제목을 앞에 붙인다."""
+    """CHUNK_CHARS보다 긴 조항을 나눈다. 새 항목(1. 2. 가. 나. ① 등)이 시작되면 그 경계에서 끊어
+    서로 다른 항목이 한 조각에 섞이지 않게 한다. 두 번째 조각부터는 조항 제목을 앞에 붙인다."""
     if len(article["text"]) <= CHUNK_CHARS:
         return [article]
 
     pieces, current = [], ""
     for line in article["text"].split("\n"):
-        if current and len(current) + len(line) > CHUNK_CHARS:
+        new_item = ITEM_START.match(line) is not None
+        # 조각이 꽉 찼거나(글자 수), 꽉 차지 않았어도 새 항목이 시작되면서 이미 내용이 쌓였으면 끊는다
+        if current and (len(current) + len(line) > CHUNK_CHARS or (new_item and len(current) > 200)):
             pieces.append(current)
             current = ""
         current += line + "\n"
