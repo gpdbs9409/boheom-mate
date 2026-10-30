@@ -23,6 +23,12 @@ sudo cp deploy/boheom-mate.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now boheom-mate
 
+# 주간 약관 확인(월 09:00 KST)과 승인 반영(5분마다). data/inbox/는 운영자가 PDF를 직접 넣는 곳, state/는 상태 기록
+mkdir -p data/inbox state
+sudo cp deploy/weekly-check.service deploy/weekly-check.timer deploy/apply-approved.service deploy/apply-approved.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now weekly-check.timer apply-approved.timer
+
 # HTTPS 인증서(Let's Encrypt). 도메인이 이 서버 IP를 가리키고 있어야 받을 수 있다. 이미 있으면 건너뛴다
 sudo certbot certonly --nginx -d boheommate.duckdns.org --non-interactive --agree-tos \
   --register-unsafely-without-email --keep-until-expiring --deploy-hook "systemctl reload nginx"

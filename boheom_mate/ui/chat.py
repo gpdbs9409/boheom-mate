@@ -6,12 +6,14 @@
 - calculate_payout: 예상 보험금을 계산한다. 금액은 GPT가 아니라 calculator.py가 계산한다.
 - 정보가 모자라면 도구를 부르지 않고 사용자에게 되묻는다.
 
-LangChain 없이 OpenAI 도구 호출(tool calling)로 직접 구현했다.
+LangChain ChatOpenAI.bind_tools로 도구 호출(tool calling) 루프를 돈다.
 """
 import json
 
-import calculator
-import rag
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+
+from boheom_mate.core import calculator
+from boheom_mate.core import rag
 
 CALCULATOR_SOURCE = "KB_실손의료비보장보험_26.09_약관.pdf"  # 계산기 공식은 기본 약관에서 옮겼다
 MAX_TOOL_ROUNDS = 4
@@ -35,6 +37,11 @@ BASE_PROMPT = """당신은 '보험메이트', 실손의료보험 약관 상담 �
 - "얼마 받아요?" 같은 금액 질문은 calculate_payout 도구로만 계산하세요. 직접 계산하지 마세요.
 - 계산에 꼭 필요한 정보: 통원/입원, 병원 종류(동네 의원·병원 / 종합병원·대학병원), 낸 금액.
   빠진 것이 있으면 도구를 부르지 말고 한 번에 짧게 물어보세요.
+- 가입 세대를 모르면 한 번 물어보세요(가입 시기: 2009.10 이전=1세대, ~2017.3=2세대, ~2021.6=3세대, 2021.7 이후=4세대).
+  모르거나 안 알려 주면 generation은 비워 두고 최신 기준으로 계산하되, 세대에 따라 실제가 다를 수 있다고 안내하세요.
+  1~3세대라고 하면 generation에 그 값을 넣으세요. 지금은 최신 기준 '참고 상한'만 제공되며 실제와 차이가 큽니다.
+- 통원 금액이 여러 번 방문의 합계면 방문 횟수(visits)를 물어 함께 넣으세요. 공제는 방문 1건당 뗍니다.
+- 실손을 2개 이상 가입했다고 하면 has_other_insurance=true로 넣으세요(비례보상 안내).
 - 낸 금액은 영수증의 '급여 본인부담금'과 '비급여' 칸에 있다고 알려 주세요.
   사용자가 "도수치료 10만 원"처럼 대략 말하면 그 금액으로 계산하세요(도수치료·주사·MRI는 해당 칸에).
 - 암, 뇌혈관·심장 질환, 희귀·난치 질환 같은 중증 질환 치료라고 말하지 않았으면 severe=false로 계산하세요.
@@ -91,6 +98,10 @@ CALCULATE_TOOL = {
                 "severe": {"type": "boolean", "description": "암 등 중증(산정특례 대상) 질환 치료인지"},
                 "room_fee": {"type": "integer", "description": "입원 시 1·2인실 추가 비용(원)"},
                 "room_days": {"type": "integer", "description": "입원 일수(1·2인실 비용이 있을 때)"},
+                "visits": {"type": "integer", "description": "통원 방문 횟수. 금액이 여러 번 방문의 합계면 그 횟수. 모르면 1"},
+                "generation": {"type": "string", "enum": ["1세대", "2세대", "3세대", "4세대"],
+                               "description": "가입 세대. 1세대: 2009.10 이전, 2세대: ~2017.3, 3세대: ~2021.6, 4세대: 2021.7 이후"},
+                "has_other_insurance": {"type": "boolean", "description": "실손보험을 2개 이상 가입했는지"},
             },
             "required": ["care", "hospital"],
         },
@@ -114,7 +125,7 @@ def _model_history(history):
         calc = m.get("calculation")
         if m["role"] == "assistant" and calc:
             content += f"\n[계산에 쓴 값: {json.dumps(calc['inputs'], ensure_ascii=False)} → 총 {calc['total']:,}원]"
-        messages.append({"role": m["role"], "content": content})
+        messages.append(AIMessage(content=content) if m["role"] == "assistant" else HumanMessage(content=content))
     return messages
 
 
@@ -146,30 +157,28 @@ def reply(history, source):
              "summary": 질문 요지|None, "searches": [GPT가 검색한 질문]}
     """
     tools = [SEARCH_TOOL] + ([CALCULATE_TOOL] if source == CALCULATOR_SOURCE else [])
-    messages = [{"role": "system", "content": _system_prompt(source)}] + _model_history(history)
+    llm = rag._llm.bind_tools(tools)
+    messages = [SystemMessage(content=_system_prompt(source))] + _model_history(history)
     turn = {"evidence": [], "calculation": None, "summary": None, "searches": []}
 
     for _ in range(MAX_TOOL_ROUNDS):
-        response = rag._client.chat.completions.create(
-            model=rag.ANSWER_MODEL, temperature=rag.TEMPERATURE, messages=messages, tools=tools,
-        )
-        message = response.choices[0].message
+        message = llm.invoke(messages)
         if not message.tool_calls:
-            return {"content": message.content or "", **turn}
+            content = message.content if isinstance(message.content, str) else message.text
+            return {"content": content or "", **turn}
 
-        messages.append(message.model_dump(exclude_none=True))
+        messages.append(message)
         for call in message.tool_calls:
             try:
-                args = json.loads(call.function.arguments or "{}")
-                if call.function.name == "search_terms":
+                args = call["args"] or {}
+                if call["name"] == "search_terms":
                     output = _run_search(args, source, turn)
-                elif call.function.name == "calculate_payout":
+                elif call["name"] == "calculate_payout":
                     output = _run_calculate(args, turn)
                 else:
-                    output = {"error": f"없는 도구: {call.function.name}"}
+                    output = {"error": f"없는 도구: {call['name']}"}
             except (ValueError, TypeError) as e:  # 잘못된 값이면 GPT가 고쳐서 다시 부르거나 사용자에게 묻게 한다
                 output = {"error": str(e)}
-            messages.append({"role": "tool", "tool_call_id": call.id,
-                             "content": json.dumps(output, ensure_ascii=False)})
+            messages.append(ToolMessage(content=json.dumps(output, ensure_ascii=False), tool_call_id=call["id"]))
 
     return {"content": "죄송해요, 답을 정리하지 못했어요. 질문을 조금 바꿔서 다시 물어봐 주세요.", **turn}

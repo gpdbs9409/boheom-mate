@@ -18,7 +18,7 @@ from pathlib import Path
 EVAL_DIR = Path(__file__).parent
 sys.path.insert(0, str(EVAL_DIR.parent))
 
-import rag  # noqa: E402
+from boheom_mate.core import rag  # noqa: E402
 
 DEFAULT_SOURCE = "KB_실손의료비보장보험_26.09_약관.pdf"
 TOP_N = 5

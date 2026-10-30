@@ -5,10 +5,11 @@ from functools import lru_cache
 
 import chromadb
 from dotenv import load_dotenv
-from openai import OpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 
-import glossary
-import ingest
+from boheom_mate.core import glossary
+from boheom_mate.core import ingest
 
 ANSWER_MODEL = "gpt-5.4-mini"
 TOP_K = 8
@@ -16,7 +17,15 @@ TOP_K = 8
 TEMPERATURE = 0
 
 load_dotenv(ingest.BASE_DIR / ".env")
-_client = OpenAI()
+# 질문 분석·답변 생성·채팅 에이전트가 같이 쓰는 LLM (LangChain ChatOpenAI)
+_llm = ChatOpenAI(model=ANSWER_MODEL, temperature=TEMPERATURE)
+_json_llm = _llm.bind(response_format={"type": "json_object"})
+
+
+def _ask_json(system, user):
+    """시스템 프롬프트와 사용자 글을 보내고 JSON 답을 dict로 돌려준다."""
+    reply = _json_llm.invoke([SystemMessage(content=system), HumanMessage(content=user)])
+    return json.loads(reply.content)
 
 
 _db = None
@@ -94,16 +103,7 @@ def analyze_question(question):
     (앱을 다시 켜면 기억이 지워진다)
     반환값: {"subject": [...], "cause": str, "care": [...], "intent": str, "terms": [...]}
     """
-    response = _client.chat.completions.create(
-        model=ANSWER_MODEL,
-        temperature=TEMPERATURE,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": ANALYZE_PROMPT},
-            {"role": "user", "content": "\n".join(filter(None, [question, _hint(question)]))},
-        ],
-    )
-    result = json.loads(response.choices[0].message.content)
+    result = _ask_json(ANALYZE_PROMPT, "\n".join(filter(None, [question, _hint(question)])))
     as_list = lambda v: [str(x).strip() for x in (v if isinstance(v, list) else [v] if v else []) if str(x).strip()]
     return {
         "subject": as_list(result.get("subject"))[:3],
@@ -151,8 +151,9 @@ REQUIRED_ARTICLES = {
 NON_COVERAGE_SECTIONS = (ingest.GUIDE, "제도성 특약", "별표", "관련 법규")
 USE_REQUIRED_ARTICLES = True
 
-# 검색 방식. "vector": 의미 검색만, "hybrid": 의미 검색 + 키워드 검색(BM25)
-SEARCH_MODE = "hybrid"
+# 검색 방식. "vector": 의미 검색만, "hybrid": 직접 구현한 하이브리드(요지 분석+필수 조항),
+# "langchain": LangChain EnsembleRetriever(벡터 + kiwi BM25, 원래 질문). E7에서 채택
+SEARCH_MODE = "langchain"
 # 각 검색에서 후보를 몇 개씩 가져와 합칠지
 CANDIDATES = 20
 # 순위 합치기(RRF) 상수. 클수록 1등과 10등의 점수 차이가 줄어든다. 흔히 60을 쓴다
@@ -181,6 +182,97 @@ def _article(meta, doc, **extra):
     }
 
 
+LC_VECTOR_K = 20  # 벡터 검색 후보 수
+LC_BM25_K = 30  # BM25 후보 수
+LC_WEIGHTS = [0.5, 0.5]  # EnsembleRetriever 안에서 벡터, BM25 가중치
+# 원래 질문 검색과 요지 검색어 검색의 가중치. 원래 질문이 세부 표현을 살리고, 요지 검색어가 조항 이름을 보탠다(E8)
+LC_QUERY_WEIGHTS = [2, 1]
+SEARCH_SETTINGS.update({
+    "lc_vector_k": LC_VECTOR_K, "lc_bm25_k": LC_BM25_K,
+    "lc_weights": LC_WEIGHTS, "lc_query_weights": LC_QUERY_WEIGHTS,
+})
+
+
+@lru_cache(maxsize=1)
+def _lc_embeddings():
+    from langchain_openai import OpenAIEmbeddings
+
+    return OpenAIEmbeddings(model=ingest.EMBEDDING_MODEL)
+
+
+def _lc_vector_retriever(source):
+    """기존 Chroma 컬렉션을 그대로 LangChain에 연결한다(재색인 없음). 같은 클라이언트를 같이 쓴다."""
+    from langchain_chroma import Chroma
+
+    _collection()  # 공용 PersistentClient(_db)를 먼저 만든다
+    store = Chroma(client=_db, collection_name=ingest.COLLECTION_NAME, embedding_function=_lc_embeddings())
+    return store.as_retriever(search_kwargs={"k": LC_VECTOR_K, "filter": {"source": source}})
+
+
+@lru_cache(maxsize=10)
+def _lc_bm25(source, doc_count):
+    """상품별 BM25 검색기. 토큰화는 kiwi(keyword_search.tokenize)를 쓰고, 조각 앞에 구역·조항 제목을 붙여 센다.
+    doc_count가 바뀌면(약관을 다시 넣으면) 새로 만든다."""
+    from langchain_community.retrievers import BM25Retriever
+    from langchain_core.documents import Document
+    from boheom_mate.core import keyword_search
+
+    data = _collection().get(where={"source": source}, include=["documents", "metadatas"])
+    prefix = {doc: f'{m.get("section", "")} {m["article_no"]} {m["title"]}\n'
+              for doc, m in zip(data["documents"], data["metadatas"])}
+    docs = [Document(page_content=doc, metadata={**m, "id": id_})
+            for id_, doc, m in zip(data["ids"], data["documents"], data["metadatas"])]
+    retriever = BM25Retriever.from_documents(
+        docs, preprocess_func=lambda text: keyword_search.tokenize(prefix.get(text, "") + text))
+    retriever.k = LC_BM25_K
+    return retriever
+
+
+def _intent_query(analysis):
+    """요지로 만든 검색어 하나: 대상 + 약관 용어 + 원인 + 치료 + 질문 유형별 조항 이름."""
+    cause = analysis["cause"] if analysis["cause"] != "해당없음" else ""
+    return " ".join(filter(None, [
+        " ".join(analysis["subject"]), " ".join(analysis["terms"]), cause,
+        " ".join(analysis["care"]), INTENTS[analysis["intent"]],
+    ]))
+
+
+def _doc_count(source):
+    return len(_collection().get(where={"source": source}, include=[])["ids"])
+
+
+def warm_up(source):
+    """BM25 검색기를 미리 만든다. 서버에서 첫 질문이 오래 걸리지 않게 앱 시작 때 부른다."""
+    _lc_bm25(source, _doc_count(source))
+
+
+def _search_langchain(question, source, k, debug):
+    """LangChain 하이브리드 검색.
+
+    1. EnsembleRetriever: 벡터 검색(OpenAI 임베딩 + Chroma)과 BM25(kiwi 형태소)를 가중 RRF로 합친다.
+    2. 이 검색을 원래 질문과 요지 검색어로 한 번씩 돌리고, 두 순위를 2:1 가중 RRF로 다시 합친다.
+    """
+    from langchain_classic.retrievers import EnsembleRetriever
+
+    ensemble = EnsembleRetriever(
+        retrievers=[_lc_vector_retriever(source), _lc_bm25(source, _doc_count(source))], weights=LC_WEIGHTS)
+    analysis = analyze_question(question)
+    intent_query = _intent_query(analysis)
+    queries = [question] + ([intent_query] if intent_query and intent_query != question else [])
+    scores, docs = {}, {}
+    for query, weight in zip(queries, LC_QUERY_WEIGHTS):
+        for rank, d in enumerate(ensemble.invoke(query), start=1):
+            docs[d.page_content] = d
+            scores[d.page_content] = scores.get(d.page_content, 0) + weight / (RRF_C + rank)
+    ranked = sorted(scores, key=scores.get, reverse=True)[:k]
+    if debug is not None:
+        debug["analysis"] = analysis
+        debug["queries"] = queries
+        debug["keywords"] = intent_query
+    return [_article(docs[t].metadata, t, score=scores[t], id=docs[t].metadata.get("id") or docs[t].id)
+            for t in ranked]
+
+
 def search(question, source, k=TOP_K, debug=None):
     """관련 조각 k개를 고른다. 같은 상품 안에서만 찾는다.
 
@@ -189,9 +281,11 @@ def search(question, source, k=TOP_K, debug=None):
     3. 의미 검색(벡터) 2개와 키워드 검색(BM25) 1개의 순위를 RRF로 합친다.
        여러 검색에서 고르게 상위권인 조각이 1등이 된다.
     """
-    import keyword_search
+    from boheom_mate.core import keyword_search
 
     question = " ".join(question.split())
+    if SEARCH_MODE == "langchain":
+        return _search_langchain(question, source, k, debug)
     analysis = analyze_question(question)
     queries, keyword_text = build_queries(analysis)
     if not queries:
@@ -206,10 +300,7 @@ def search(question, source, k=TOP_K, debug=None):
         debug["keywords"] = keyword_text
         debug["keyword_tokens"] = keyword_tokens
 
-    embeddings = [
-        item.embedding
-        for item in _client.embeddings.create(model=ingest.EMBEDDING_MODEL, input=queries).data
-    ]
+    embeddings = _lc_embeddings().embed_documents(queries)
     n = k if SEARCH_MODE == "vector" else CANDIDATES
     result = _collection().query(query_embeddings=embeddings, n_results=n, where={"source": source})
     vector_lists = [
@@ -259,7 +350,7 @@ def _required_chunks(title_prefixes, source, embeddings, keyword_tokens, found):
     해당 조항의 조각들만 놓고 의미 검색 순위와 키워드 검색 순위를 RRF로 합쳐 1등을 고른다.
     전체 검색에서 받은 점수(found)가 있으면 그 점수를 쓰고, 없으면 0으로 둔다(맨 뒤로 정렬).
     """
-    import keyword_search
+    from boheom_mate.core import keyword_search
 
     data = _collection().get(where={"source": source}, include=["metadatas"])
     titles = sorted({
@@ -309,9 +400,16 @@ SYSTEM_PROMPT = """당신은 보험약관 상담 도우미입니다.
   예: 맹장 수술 → 질병으로 인한 입원·수술. 이런 상식 수준의 분류는 추측이 아닙니다.
   분류했다면 답변에 그 사실을 밝히세요.
 - 보상 여부는 보상하는 조항과 보상하지 않는 사항(면책)을 함께 확인해 답하세요.
+- 면책(보상하지 않는 사항)은 질문의 상황과 직접 관련된 항목만 언급하세요.
+  질문과 무관한 면책 항목(예: 감기 질문에 임신·출산·비만·요실금 등)은 나열하거나 인용하지 마세요.
+  관련된 면책이 없으면 면책은 언급하지 않아도 됩니다.
 - 주어진 조항으로 답할 수 있으면 found=true, 답변에 쓴 근거 번호를 evidence에 넣으세요.
+- evidence에는 답변의 결론을 **직접 뒷받침한 핵심 조항만** 넣으세요(보통 1~3개).
+  관련 있어 보인다는 이유로 참고만 한 조항은 넣지 마세요. 핵심 근거를 적게 추리는 것이 좋습니다.
 - 주어진 조항이 질문의 주제(예: 자동차 수리비, 대출 금리)를 전혀 다루지 않을 때만
-  found=false, evidence=[]로 하고 answer는 비워 두세요."""
+  found=false, evidence=[]로 하고 answer는 비워 두세요.
+- 실손의료보험은 사람이 다치거나 아파서 낸 의료비만 보상합니다. 차량 수리비, 집·가구·물건 같은 재산 손해,
+  사은품처럼 의료비가 아닌 것을 물으면, 비슷한 단어(자동차보험, 화재 등)가 조항에 보여도 found=false로 하세요."""
 
 NOT_FOUND_MESSAGE = "약관에서 확인할 수 없는 내용입니다. 정확한 내용은 보험사 고객센터에 문의해 주세요."
 
@@ -330,16 +428,7 @@ def answer(question, source, articles=None):
         for i, a in enumerate(articles, start=1)
     )
     hint = _hint(question)
-    response = _client.chat.completions.create(
-        model=ANSWER_MODEL,
-        temperature=TEMPERATURE,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"{context}\n\n[질문]\n{question}\n[질문 요지] {summary}" + (f"\n{hint}" if hint else "")},
-        ],
-    )
-    result = json.loads(response.choices[0].message.content)
+    result = _ask_json(SYSTEM_PROMPT, f"{context}\n\n[질문]\n{question}\n[질문 요지] {summary}" + (f"\n{hint}" if hint else ""))
 
     # 모델이 없는 번호를 대더라도 실제 검색된 조항만 근거로 인정한다.
     evidence = [

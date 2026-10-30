@@ -11,7 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-DB_PATH = Path(__file__).parent / "questions.db"
+# boheom_mate/store/question_store.py → 프로젝트 루트는 두 단계 위(store → boheom_mate → 루트)
+DB_PATH = Path(__file__).resolve().parents[2] / "questions.db"
 KST = ZoneInfo("Asia/Seoul")  # 서버(EC2)는 UTC라서 날짜를 한국 시간으로 맞춘다
 
 

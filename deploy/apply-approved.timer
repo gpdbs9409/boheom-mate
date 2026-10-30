@@ -1,0 +1,9 @@
+# 5분마다 Slack의 "승인" 답글을 확인해 승인된 약관을 반영한다
+[Unit]
+Description=boheom-mate apply-approved every 5 minutes
+
+[Timer]
+OnCalendar=*:0/5
+
+[Install]
+WantedBy=timers.target

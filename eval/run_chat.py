@@ -23,7 +23,7 @@ from pathlib import Path
 EVAL_DIR = Path(__file__).parent
 sys.path.insert(0, str(EVAL_DIR.parent))
 
-import chat  # noqa: E402
+from boheom_mate.ui import chat  # noqa: E402
 
 JARGON = re.compile(r"비급여|(?<!비)급여|본인부담금|공제|통원|산정특례|상급병실료|요양급여")
 NOT_COVERED = re.compile(r"확인할 수 없|확인이 어렵|보상하지 않|보상되지 않|대상이 아[니닙]|해당하지 않")

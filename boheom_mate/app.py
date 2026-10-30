@@ -4,23 +4,29 @@
   (대화는 지금 브라우저 세션 것만 보이고, 새로고침하면 새 대화가 된다. 하루 전체 질문 수에 한도가 있다)
 - 약관 넣기: 기능 1
 
-실행:  streamlit run app.py
+실행:  streamlit run boheom_mate/app.py
 """
 import os
+import sys
 import threading
 import uuid
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-import chat
-import display
-import ingest
-import keyword_search
-import products
-import question_store
-import rag
+# streamlit run은 스크립트 폴더(boheom_mate/)만 import 경로에 넣으므로 프로젝트 루트를 직접 넣는다
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from boheom_mate.ui import chat
+from boheom_mate.ui import display
+from boheom_mate.core import ingest
+from boheom_mate.core import keyword_search
+from boheom_mate.store import products
+from boheom_mate.store import question_store
+from boheom_mate.core import rag
+
+# streamlit은 프로젝트 루트에서 실행하므로(WorkingDirectory=루트) 자산 경로는 CWD 기준 그대로 둔다
 LOGO_TEXT = "assets/logo_text.svg"
 LOGO_CHARACTER = "assets/logo_character.svg"
 
@@ -38,7 +44,12 @@ img[data-testid="stHeaderLogo"] { height: 3rem; max-width: none; }  /* 기본 32
 st.markdown("#### 실손보험, 보장되는지 얼마 받는지 바로 알려 드려요")
 st.caption("가입한 보험의 약관을 근거로 답하고, 영수증 금액으로 예상 보험금을 계산해요.")
 
-tab_questions, tab_ingest = st.tabs(["상담하기", "약관 넣기"])
+# 약관 넣기는 운영자용이다. 배포판에서는 주간 약관 확인(Slack 승인)이 넣으므로, 로컬에서 SHOW_INGEST_TAB=1일 때만 보인다
+SHOW_INGEST = os.getenv("SHOW_INGEST_TAB") == "1"
+if SHOW_INGEST:
+    tab_questions, tab_ingest = st.tabs(["상담하기", "약관 넣기"])
+else:
+    (tab_questions,) = st.tabs(["상담하기"])
 
 DEFAULT_SOURCE = chat.CALCULATOR_SOURCE  # 첫 방문 때 미리 색인을 만들 약관
 DAILY_LIMIT = int(os.getenv("DAILY_QUESTION_LIMIT", "100"))  # 모든 방문자를 합친 하루 질문 수
@@ -51,11 +62,11 @@ session_id = st.session_state.session_id
 
 @st.cache_resource
 def _warm_up():
-    """키워드 검색 색인(BM25)을 처음 만드는 데 서버(t3.micro)에서 약 18초 걸린다.
+    """키워드 검색기(LangChain BM25Retriever)를 처음 만드는 데 서버(t3.micro)에서 시간이 걸린다.
     앱이 뜬 뒤 첫 방문 때 뒤에서 미리 만들어, 질문하는 사람이 기다리지 않게 한다."""
     def build():
         try:
-            keyword_search.search(["보험"], DEFAULT_SOURCE, 1)
+            rag.warm_up(DEFAULT_SOURCE)
         except Exception:
             pass  # 미리 못 만들어도 첫 질문 때 다시 만든다
     threading.Thread(target=build, daemon=True).start()
@@ -127,8 +138,12 @@ def pick_product(sources):
         if col_new.button("새 대화", width="stretch"):
             st.session_state.session_id = uuid.uuid4().hex
             st.rerun()
+        # 실손은 가입한 시점의 약관이 적용되므로, 판이 여러 개면 가입한 판을 고르게 한다
+        versions = products.editions(product)
+        if len(versions) > 1:
+            product = st.selectbox("약관 판 (가입한 시점)", versions, format_func=lambda e: f'{e["edition"]}판')
     if product["source"] not in sources:
-        st.info(f"'{product['name']}' 약관은 아직 준비 중이에요. 준비된 상품을 골라 주세요.")
+        st.info(f"'{product['product']}' 약관은 아직 준비 중이에요. 준비된 상품을 골라 주세요.")
         return None
     return product["source"]
 
@@ -249,5 +264,6 @@ def render_ingest():
             st.success(f"{len(articles)}개 조항을 저장했습니다. DB 전체 {total}개")
 
 
-with tab_ingest:
-    render_ingest()
+if SHOW_INGEST:
+    with tab_ingest:
+        render_ingest()

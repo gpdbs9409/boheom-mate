@@ -85,7 +85,8 @@ def to_markdown(text):
         body = MD_SPECIAL.sub(r"\\\1", p["text"])
         # "2. 법령..."이 마크다운 번호 목록으로 바뀌어 번호가 달라지지 않게 막는다.
         body = re.sub(r"^(\d{1,2})\.", r"\1\\.", body)
-        body = AMOUNT.sub(r":red[**\1**]", body)
+        # 모든 숫자를 칠하면 근거 원문이 온통 빨개져 핵심이 안 보인다.
+        # 판정에 직접 중요한 표현(보상/면책/공제 등)만 강조한다.
         body = KEY_PHRASE.sub(r":red[**\1**]", body)
         blocks.append(body)
     return "\n\n".join(blocks)
