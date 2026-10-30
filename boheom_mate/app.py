@@ -1,7 +1,7 @@
 """보험메이트 화면.
 
 - 상담하기: 기능 2·3. 이어지는 채팅으로 약관을 근거로 답하고, 영수증 금액으로 예상 보험금을 계산한다
-  (대화는 지금 브라우저 세션 것만 보이고, 새로고침하면 새 대화가 된다. 하루 전체 질문 수에 한도가 있다)
+  (대화와 상담 메모는 지금 브라우저 세션 것만 보이고, 새로고침하면 새 대화가 된다. 하루 전체 질문 수에 한도가 있다)
 - 약관 넣기: 기능 1
 
 실행:  streamlit run boheom_mate/app.py
@@ -22,6 +22,7 @@ from boheom_mate.ui import chat
 from boheom_mate.ui import display
 from boheom_mate.core import ingest
 from boheom_mate.core import keyword_search
+from boheom_mate.core import memory as session_memory
 from boheom_mate.store import products
 from boheom_mate.store import question_store
 from boheom_mate.core import rag
@@ -92,19 +93,20 @@ def render_calculation(calc):
     red = "color: #D92D20; font-weight: 600"
     st.dataframe(table.style.map(lambda _: red, subset=["받는 돈", "근거"]), hide_index=True, width="stretch")
     for note in calc["notes"]:
-        st.caption(f"· {note}")
+        st.caption("· " + note.replace("~", "\\~"))  # "2009.10~2017.3"의 ~가 취소선으로 바뀌지 않게
 
 
 def render_evidence(evidence):
-    groups = display.group_evidence(evidence)
+    # 결론을 뒷받침한 핵심 문장이 확인된 근거를 먼저 보여 준다
+    groups = sorted(display.group_evidence(evidence), key=lambda g: not any(g["highlights"]))
     if groups:
         st.caption(f"근거 조항 {len(groups)}개 · 눌러서 원문 보기")
     for n, group in enumerate(groups, start=1):
         with st.expander(f":red[**근거 {n}**] · {display.evidence_label_md(group)}"):
-            for i, text in enumerate(group["texts"]):
+            for i, (text, highlights) in enumerate(zip(group["texts"], group["highlights"])):
                 if i > 0:
                     st.caption("⋯ 같은 조항의 다른 부분 ⋯")
-                st.markdown(display.to_markdown(text))
+                st.markdown(display.to_markdown(text, highlights))
 
 
 def avatar(role):
@@ -157,10 +159,19 @@ def render_questions():
     source = pick_product(sources)
     if not source:
         return
-    if source != chat.CALCULATOR_SOURCE:
-        st.caption("이 상품은 보험금 계산기를 아직 지원하지 않아요. 약관 내용 안내만 해 드려요.")
+    if not chat.calculator_available(source):
+        st.caption("이 상품은 약관에서 계산 기준을 확인하지 못해 보험금 계산 없이 약관 내용만 안내해 드려요.")
 
     messages = question_store.list_messages(session_id)
+    memory = question_store.get_memory(session_id)
+    remembered = session_memory.describe(memory)
+    if remembered:
+        with st.expander(f"이 대화에서 기억하는 내용 ({len(remembered)}개)"):
+            st.markdown("\n".join(f"- {line}" for line in remembered))
+            st.caption("이 대화 안에서만 기억하고, 새 대화를 시작하면 지워져요.")
+            if st.button("기억 지우기"):
+                question_store.clear_memory(session_id)
+                st.rerun()
     if not messages:
         with st.chat_message("assistant", avatar=LOGO_CHARACTER):
             st.markdown(
@@ -190,7 +201,9 @@ def render_questions():
     with st.chat_message("assistant", avatar=LOGO_CHARACTER):
         with st.spinner("약관을 찾아보는 중..."):
             try:
-                result = chat.reply(messages + [{"role": "user", "content": text}], source)
+                # 이번 질문에서 말한 사실(가입 시기 등)을 먼저 메모에 넣어, 같은 턴의 계산에도 쓰게 한다
+                memory = session_memory.update(memory, text)
+                result = chat.reply(messages + [{"role": "user", "content": text}], source, memory)
             except Exception as e:
                 st.error(f"답변을 만들지 못했습니다: {e}")
                 return
@@ -199,6 +212,9 @@ def render_questions():
         session_id, "assistant", result["content"], source,
         result["evidence"], result["calculation"], result["summary"],
     )
+    if result["calculation"]:
+        memory = session_memory.merge_calculation(memory, result["calculation"].get("inputs"))
+    question_store.save_memory(session_id, memory)
     st.rerun()
 
 

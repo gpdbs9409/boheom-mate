@@ -33,6 +33,13 @@ def _connect():
            )"""
     )
     conn.execute("CREATE TABLE IF NOT EXISTS daily_usage (day TEXT PRIMARY KEY, count INTEGER NOT NULL)")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS session_memory (
+               session_id TEXT PRIMARY KEY,
+               memory TEXT NOT NULL,
+               updated_at TEXT NOT NULL
+           )"""
+    )
     return conn
 
 
@@ -72,6 +79,27 @@ def list_messages(session_id):
         m["evidence"] = json.loads(m["evidence"] or "[]")
         m["calculation"] = json.loads(m["calculation"]) if m["calculation"] else None
     return messages
+
+
+def get_memory(session_id):
+    """이 세션의 상담 메모(core.memory 형식). 없으면 None."""
+    with _connect() as conn:
+        row = conn.execute("SELECT memory FROM session_memory WHERE session_id = ?", (session_id,)).fetchone()
+    return json.loads(row["memory"]) if row else None
+
+
+def save_memory(session_id, memory):
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO session_memory (session_id, memory, updated_at) VALUES (?, ?, ?)
+               ON CONFLICT(session_id) DO UPDATE SET memory = excluded.memory, updated_at = excluded.updated_at""",
+            (session_id, json.dumps(memory, ensure_ascii=False), _now().strftime("%Y-%m-%d %H:%M")),
+        )
+
+
+def clear_memory(session_id):
+    with _connect() as conn:
+        conn.execute("DELETE FROM session_memory WHERE session_id = ?", (session_id,))
 
 
 def use_daily_quota(limit):

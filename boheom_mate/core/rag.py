@@ -393,7 +393,8 @@ SYSTEM_PROMPT = """당신은 보험약관 상담 도우미입니다.
 약관에 없는 내용은 추측하지 마세요.
 
 반드시 다음 JSON 형식으로만 답하세요.
-{"found": true 또는 false, "answer": "답변", "evidence": [실제로 근거로 쓴 번호들]}
+{"found": true 또는 false, "answer": "답변", "evidence": [실제로 근거로 쓴 번호들],
+ "highlights": {"근거 번호": ["그 근거에서 결론을 직접 뒷받침한 문장"]}}
 
 - 약관에는 구체적인 병명이나 상황이 적혀 있지 않습니다. 질문 속 상황을 약관의 일반 개념
   (질병/상해, 입원/통원, 급여/비급여 등)으로 분류해 해당 조항을 적용하세요.
@@ -404,6 +405,8 @@ SYSTEM_PROMPT = """당신은 보험약관 상담 도우미입니다.
   질문과 무관한 면책 항목(예: 감기 질문에 임신·출산·비만·요실금 등)은 나열하거나 인용하지 마세요.
   관련된 면책이 없으면 면책은 언급하지 않아도 됩니다.
 - 주어진 조항으로 답할 수 있으면 found=true, 답변에 쓴 근거 번호를 evidence에 넣으세요.
+- highlights에는 evidence에 넣은 근거마다, 답변의 결론을 직접 뒷받침한 문장을 1~2개 넣으세요.
+  근거 원문을 한 글자도 바꾸지 말고 문장 단위로 그대로 복사하세요. 질문과 관계없는 문장은 넣지 마세요.
 - evidence에는 답변의 결론을 **직접 뒷받침한 핵심 조항만** 넣으세요(보통 1~3개).
   관련 있어 보인다는 이유로 참고만 한 조항은 넣지 마세요. 핵심 근거를 적게 추리는 것이 좋습니다.
 - 주어진 조항이 질문의 주제(예: 자동차 수리비, 대출 금리)를 전혀 다루지 않을 때만
@@ -431,11 +434,18 @@ def answer(question, source, articles=None):
     result = _ask_json(SYSTEM_PROMPT, f"{context}\n\n[질문]\n{question}\n[질문 요지] {summary}" + (f"\n{hint}" if hint else ""))
 
     # 모델이 없는 번호를 대더라도 실제 검색된 조항만 근거로 인정한다.
-    evidence = [
-        {"section": a.get("section", ""), "article_no": a["article_no"], "title": a["title"], "text": a["text"]}
-        for i, a in enumerate(articles, start=1)
-        if i in set(result.get("evidence") or [])
-    ]
+    # 핵심 문장도 그 근거 원문에 실제로 있는 것만 인정한다(공백 차이는 무시).
+    picked = set(result.get("evidence") or [])
+    marks = result.get("highlights") or {}
+    evidence = []
+    for i, a in enumerate(articles, start=1):
+        if i not in picked:
+            continue
+        text_norm = "".join(a["text"].split())
+        quotes = marks.get(str(i)) or marks.get(i) or []
+        highlights = [q for q in quotes if isinstance(q, str) and q.strip() and "".join(q.split()) in text_norm]
+        evidence.append({"section": a.get("section", ""), "article_no": a["article_no"], "title": a["title"],
+                         "text": a["text"], "highlights": highlights})
     if not result.get("found") or not evidence:
         return {"found": False, "answer": NOT_FOUND_MESSAGE, "evidence": [], "summary": summary}
     return {"found": True, "answer": result["answer"], "evidence": evidence, "summary": summary}
