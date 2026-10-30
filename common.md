@@ -12,6 +12,13 @@ Claude Code, Codex, Kiro 등 모든 AI 에이전트가 이 문서를 공통으�
 > 현재 상태: Python 3.12와 `.venv` 설치 완료. 기능 1(약관 넣기)을 구현했고, 기본 약관(25478) 1개만 Chroma에 저장했다(긴 조항을 나눠 308조각). 나머지 4개는 RAG 성능을 확인한 뒤 하나씩 추가하기로 했으니, `python ingest.py`(전체 저장)는 쓰지 않는다. 핵심 기능 3개를 모두 구현했다. `app.py`의 "질문하기" 탭에서 상품을 고르고 질문하면 `rag.answer()`가 답한다. `source`로 필터링하고, 원래 질문과 약관 용어로 바꾼 질문으로 조각 8개(`TOP_K`)를 검색한다. 그다음 `gpt-5.4-mini`가 JSON(found/answer/evidence 번호)으로 답한다. 질문, 답변, 근거 조항 원문은 SQLite에 저장되어 목록과 펼치기로 다시 볼 수 있다. "약관 넣기" 탭은 PDF 하나를 골라 미리 보고 저장하며, 업로드 기능은 아니다. 폴더는 아직 `my-app`이고 `boheom-mate`로 이름을 바꿀 예정이다.
 >
 > 2026-10-17 추가(사용자 요청): "상담하기" 탭이 채팅으로 바뀌었다. `chat.reply`가 OpenAI 도구 호출로 턴마다 `search_terms`(= `rag.answer`) / `calculate_payout`(= `calculator.calculate`, 기본 약관 제3조 공식) / 되묻기를 고른다. 금액은 반드시 코드가 계산한다. 쉬운 말 규칙은 `chat.PLAIN_LANGUAGE`. 대화는 `question_store`의 `chat_messages` 표에 세션별로 저장한다. 상품 선택은 `products.py`(보험사 → 종류 → 이름 검색, 껍데기: `source`가 있는 상품만 상담 가능). 로고는 `assets/`(Pretendard 글자를 path로 딴 SVG), 글꼴은 Pretendard, 근거·금액·판정 표현은 붉은색 강조(`display.py`). 평가는 `eval/run_chat.py`(E5), 계산기 테스트는 `tests/test_calculator.py`.
+>
+> 2026-10-30 추가(사용자 요청, E10):
+> - **약관 기반 계산 규칙**: 계산기의 자기부담률·공제금액·한도는 코드에 박아 두지 않고 `core/policy_rules.py`가 상품마다 약관 제3조(메타데이터로 찾음)에서 뽑는다. 뽑은 값마다 약관 인용문을 받아, 인용문이 원문에 있고 숫자가 인용문 안에 있는지 코드가 확인한다(최대 3번 시도, 결과는 `state/rules/`). 값을 다 확인하지 못한 상품은 계산기를 끄고 약관 안내만 한다. KB 기본형은 22/22 일치. 간편가입(25481)은 구역 판별을 고쳐 다시 넣었지만(E11 참고), 급여·비급여를 한 담보로 합친 구조라 기본형 계산 항목과 맞지 않아 계산기가 꺼져 있다(별도 계산식 필요). `calculator.KB_BASE_RULES`는 테스트 기준값으로만 쓴다.
+> - **보상 비율·한도 함께 안내(E11)**: 보상된다고 답할 때 근거의 비율·공제금액·한도를 원문 숫자 그대로 함께 적는다(계산은 하지 않는다).
+> - **근거 핵심 문장 강조**: "보상합니다" 같은 단어 강조(`KEY_PHRASE`)를 없앴다. 답변 LLM이 근거마다 원문 그대로의 핵심 문장(`highlights`)을 돌려주고, 원문에 실제로 있는 문장만 `display.py`가 붉게 칠한다. 근거 목록은 강조 문장이 있는 근거가 먼저 온다.
+> - **MCP 연동(사용자 요청)**: `integrations/mcp_client.py`(`langchain-mcp-adapters==0.3.2`, `mcp==1.30.0`). 행동별로 허용한 보내기·이슈 만들기 도구만 쓰고, LLM에는 MCP 도구를 직접 주지 않는다. 에이전트 도구 `prepare_action`은 보낼 글 미리보기만 만들고, 사용자가 화면에서 고치고 동의 후 '보내기'를 눌러야 `mcp_client.execute`가 보낸다. 보낼 곳은 환경변수로 고정. GitHub(답변 오류 신고 → `issue_write`)는 `.env`에 `GITHUB_MCP_TOKEN`·`GITHUB_ISSUE_REPO`가 있을 때만 켜진다(지금 없음). Slack(설계사 상담 요청)은 `.env`에 `SLACK_MCP_USER_TOKEN`(MCP를 켠 Slack 앱의 사용자 토큰 xoxp, chat:write)·`SLACK_HANDOFF_CHANNEL_ID`가 있을 때만 켜진다(봇 토큰은 Slack MCP 문서상 지원 대상이 아님). 키를 넣은 뒤 `python -m boheom_mate.integrations.mcp_client --check`로 확인(보내지 않음). 도구·입력 칸 이름은 후보 목록에서 맞춘다. 설정이 없으면 도구·프롬프트가 이전과 같다. 반대 방향으로 `boheom_mate/mcp_server.py`(FastMCP, 읽기 전용: `list_products`·`search_terms`·`calculate_payout`)를 `.kiro/settings/mcp.json`에 등록했다. 테스트: `tests/test_mcp_client.py`(가짜 stdio 서버), `tests/test_chat_actions.py`.
+> - **세션 메모리**: 로그인 없이 한 대화 안에서 가입 시기·세대·치료 형태·병원 종류·병명 등을 기억한다(`core/memory.py`, `questions.db`의 `session_memory` 표). 세대는 LLM이 아니라 `memory.generation_of`가 가입 연월로 계산한다(경계: 2009.10 / 2017.4 / 2021.7, 경계 연도인데 월을 모르면 비워 둔다). 사용자 입력으로 채팅 호출 전에 갱신하고, 계산에 쓴 값은 호출 뒤에 합친다. 화면의 "이 대화에서 기억하는 내용"에서 보고 지울 수 있다. "새 대화"를 누르면 지워지고, 24시간(`MEMORY_TTL_HOURS`) 지난 메모는 저장할 때 함께 지운다.
 
 ## 범위: 핵심 기능 3개만
 
@@ -66,10 +73,10 @@ Claude Code, Codex, Kiro 등 모든 AI 에이전트가 이 문서를 공통으�
 - 정확도 실험은 `eval/EXPERIMENTS.md`에 가설, 바꾼 것, 결과 파일, 판정을 남긴다. 사용자가 최종 확인한다. 현재 채택안은 E2(하이브리드)로 검색 적중 94%, 상위 3 82%, MRR 0.59다.
 - 검색 구조(E2): `rag.analyze_question`(GPT가 약관 용어 문장과 키워드 추출, 캐시) → 벡터 검색 3개(Chroma) + 키워드 검색 1개(`keyword_search.py`: kiwi 형태소 분석 + BM25) → RRF로 합쳐 상위 8개. 조각마다 `section`(안내자료/보통약관/특별약관1·2/제도성 특약/별표/관련 법규) 메타데이터가 있다. `ingest.py`를 바꾸면 기본 약관만 `build_index`로 다시 넣는다.
 - 현재 기본값은 E4다(E3b + `REQUIRED_ARTICLES`: 질문 유형별 필수 조항을 보통약관·특약마다 한 조각씩 먼저 넣는다). E3b 설명: `rag.analyze_question`이 질문 요지를 정해진 보기(대상/원인/치료/질문 유형/약관 용어)에서 고르고, `build_queries`가 요지로 검색어를 만든다. 원래 질문도 벡터 검색어로 함께 쓴다(`INCLUDE_RAW_QUESTION`). 표현만 다른 질문의 일관성은 `eval/run_paraphrase.py`로 잰다. 화면에는 "질문 요지"를 보여 준다(`questions.summary` 칸).
-- 구역 판별(`ingest.find_sections`)은 기본 약관(25478) 기준으로 만들었다. 간편가입(25481)에서는 "기본형 실손의료보험" 시작 줄을 찾지 못해 안내자료가 보통약관으로 잡힌다. DB에 있는 간편가입 162조각은 예전 방식으로 잘린 것이다. 앱의 상품 기본값은 기본 약관이다.
+- 구역 판별(`ingest.find_sections`)은 "기본형 실손의료보험" 또는 "기본형 간편가입 실손의료보험" 줄을 보통약관 시작으로 본다. 간편가입(25481)은 2026-10-30에 현재 방식으로 다시 넣었다(로컬 356조각). 서버 DB는 주간 약관 확인·승인 절차로 따로 반영해야 한다. 앱의 상품 기본값은 기본 약관이다.
 - GitHub: 원격 저장소는 `git@github.com:gpdbs9409/boheom-mate.git`(SSH, 포트 443 설정). 약관 PDF(`data/*.pdf`)는 올리지 않는다.
 - `glossary.py`에 용어를 추가할 때는 약관에 실제로 있는 용어인지 확인한다. 평가셋의 정답 숫자를 사전에 넣으면 점수가 부풀려지니 넣지 않는다.
-- `display.py`는 근거 원문을 화면에 보여줄 때만 다듬는다(줄 이어붙이기, 꼬리말과 띠지 제거, 숫자 강조). 저장된 원문은 바꾸지 않는다. 표는 여전히 한 줄로 뭉쳐 보인다.
+- `display.py`는 근거 원문을 화면에 보여줄 때만 다듬는다(줄 이어붙이기, 꼬리말과 띠지 제거, 핵심 문장 강조). 저장된 원문은 바꾸지 않는다. 표는 여전히 한 줄로 뭉쳐 보인다.
 
 ## 확인할 것 (미정, 구현 중 되돌아와야 함)
 
