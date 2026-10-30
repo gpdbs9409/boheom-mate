@@ -42,7 +42,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 실행
 
 ```
-.venv/bin/streamlit run app.py                  # 앱 (http://localhost:8501)
+.venv/bin/streamlit run boheom_mate/app.py               # 앱 (http://localhost:8501)
 .venv/bin/python eval/run_eval.py               # 평가: dev 20문항 × 3회
 .venv/bin/python eval/run_eval.py --split test  # 최종 확인용 10문항. 튜닝 중에는 돌리지 않는다
 ```

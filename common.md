@@ -41,8 +41,8 @@ Claude Code, Codex, Kiro 등 모든 AI 에이전트가 이 문서를 공통으�
 | 저장 | (처음 결정한 "저장 안 함"에서 사용자 요청으로 변경) 사용자가 입력한 질문을 `question_store.py`로 SQLite 파일 `questions.db`에 저장하고, "질문 저장" 탭에 목록으로 보여준다. 로그인이 없어서 브라우저 세션별로 자기 질문만 본다(아래 "저장된 질문의 공개 범위") |
 | 사용 범위 | 링크 받은 사람도 사용 → OpenAI 사용 한도와 질문 횟수 제한 필요 |
 | 배포 | AWS EC2 (4주차). 대체안은 Streamlit Cloud. Streamlit은 Vercel에 배포 불가 |
-| 스택 | Python 3.11+, streamlit, openai(임베딩 + 답변), chromadb, pypdf, python-dotenv |
-| 프레임워크 | LangChain을 의도적으로 쓰지 않는다. 사용자가 "검색 → 프롬프트 → 답변" 흐름을 직접 이해하고 면접에서 설명할 수 있어야 하기 때문 |
+| 스택 | Python 3.11+, streamlit, LangChain(langchain-openai·langchain-chroma·langchain-community·langchain-classic), openai(임베딩 + 답변), chromadb, pypdf, kiwipiepy, rank-bm25, python-dotenv |
+| 프레임워크 | (2026-10-30 변경, 사용자 결정) LangChain을 쓴다. 처음에는 흐름을 직접 이해하려고 쓰지 않았지만, 같은 평가셋에서 LangChain 하이브리드 검색(우리 청킹 + `EnsembleRetriever` 벡터·kiwi BM25 + 요지 검색어 2:1)이 직접 구현보다 높게 나와 전환했다(E7~E9). 청킹(`ingest.split_articles`)·질문 요지 분석·계산기·프롬프트는 우리 코드 그대로이고, LLM 호출은 `ChatOpenAI`, 임베딩은 `OpenAIEmbeddings`, 검색은 `EnsembleRetriever`, 채팅 에이전트는 `bind_tools`로 바꿨다. 직접 구현한 검색은 `rag.SEARCH_MODE = "hybrid"`로 되돌릴 수 있다 |
 
 ## 계획된 구조
 

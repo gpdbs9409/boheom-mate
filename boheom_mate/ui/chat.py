@@ -6,9 +6,11 @@
 - calculate_payout: 예상 보험금을 계산한다. 금액은 GPT가 아니라 calculator.py가 계산한다.
 - 정보가 모자라면 도구를 부르지 않고 사용자에게 되묻는다.
 
-LangChain 없이 OpenAI 도구 호출(tool calling)로 직접 구현했다.
+LangChain ChatOpenAI.bind_tools로 도구 호출(tool calling) 루프를 돈다.
 """
 import json
+
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from boheom_mate.core import calculator
 from boheom_mate.core import rag
@@ -123,7 +125,7 @@ def _model_history(history):
         calc = m.get("calculation")
         if m["role"] == "assistant" and calc:
             content += f"\n[계산에 쓴 값: {json.dumps(calc['inputs'], ensure_ascii=False)} → 총 {calc['total']:,}원]"
-        messages.append({"role": m["role"], "content": content})
+        messages.append(AIMessage(content=content) if m["role"] == "assistant" else HumanMessage(content=content))
     return messages
 
 
@@ -155,30 +157,28 @@ def reply(history, source):
              "summary": 질문 요지|None, "searches": [GPT가 검색한 질문]}
     """
     tools = [SEARCH_TOOL] + ([CALCULATE_TOOL] if source == CALCULATOR_SOURCE else [])
-    messages = [{"role": "system", "content": _system_prompt(source)}] + _model_history(history)
+    llm = rag._llm.bind_tools(tools)
+    messages = [SystemMessage(content=_system_prompt(source))] + _model_history(history)
     turn = {"evidence": [], "calculation": None, "summary": None, "searches": []}
 
     for _ in range(MAX_TOOL_ROUNDS):
-        response = rag._client.chat.completions.create(
-            model=rag.ANSWER_MODEL, temperature=rag.TEMPERATURE, messages=messages, tools=tools,
-        )
-        message = response.choices[0].message
+        message = llm.invoke(messages)
         if not message.tool_calls:
-            return {"content": message.content or "", **turn}
+            content = message.content if isinstance(message.content, str) else message.text
+            return {"content": content or "", **turn}
 
-        messages.append(message.model_dump(exclude_none=True))
+        messages.append(message)
         for call in message.tool_calls:
             try:
-                args = json.loads(call.function.arguments or "{}")
-                if call.function.name == "search_terms":
+                args = call["args"] or {}
+                if call["name"] == "search_terms":
                     output = _run_search(args, source, turn)
-                elif call.function.name == "calculate_payout":
+                elif call["name"] == "calculate_payout":
                     output = _run_calculate(args, turn)
                 else:
-                    output = {"error": f"없는 도구: {call.function.name}"}
+                    output = {"error": f"없는 도구: {call['name']}"}
             except (ValueError, TypeError) as e:  # 잘못된 값이면 GPT가 고쳐서 다시 부르거나 사용자에게 묻게 한다
                 output = {"error": str(e)}
-            messages.append({"role": "tool", "tool_call_id": call.id,
-                             "content": json.dumps(output, ensure_ascii=False)})
+            messages.append(ToolMessage(content=json.dumps(output, ensure_ascii=False), tool_call_id=call["id"]))
 
     return {"content": "죄송해요, 답을 정리하지 못했어요. 질문을 조금 바꿔서 다시 물어봐 주세요.", **turn}

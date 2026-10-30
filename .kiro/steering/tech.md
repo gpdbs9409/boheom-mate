@@ -6,7 +6,8 @@
   ChromaDB (벡터 저장), pypdf (PDF 텍스트), kiwipiepy (형태소 분석 + BM25), slack_sdk, requests.
 
 ## 의도적으로 하지 않는 것
-- **LangChain을 쓰지 않는다.** "검색 → 프롬프트 → 답변" 흐름을 직접 이해하고 설명할 수 있어야 한다.
+- (2026-10-30 변경) LangChain을 쓴다: LLM 호출 `ChatOpenAI`, 임베딩 `OpenAIEmbeddings`, 검색 `EnsembleRetriever`(벡터 + kiwi BM25), 채팅 에이전트 `bind_tools`.
+  청킹·질문 요지 분석·계산기·프롬프트는 직접 작성한 코드를 유지한다. 기본 설정(글자 수 청킹 + 벡터만)은 평가에서 47%로 낮았으니 쓰지 않는다.
 - 금액 계산을 LLM에 맡기지 않는다. `calculator.py`가 약관 공식으로 계산한다.
 - 질의 시점에 PDF를 다시 파싱하지 않는다. 색인은 오프라인 일회성(`build_index`).
 

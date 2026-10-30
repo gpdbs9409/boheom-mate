@@ -7,11 +7,16 @@
 실행:  streamlit run boheom_mate/app.py
 """
 import os
+import sys
 import threading
 import uuid
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+
+# streamlit run은 스크립트 폴더(boheom_mate/)만 import 경로에 넣으므로 프로젝트 루트를 직접 넣는다
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from boheom_mate.ui import chat
 from boheom_mate.ui import display
@@ -57,11 +62,11 @@ session_id = st.session_state.session_id
 
 @st.cache_resource
 def _warm_up():
-    """키워드 검색 색인(BM25)을 처음 만드는 데 서버(t3.micro)에서 약 18초 걸린다.
+    """키워드 검색기(LangChain BM25Retriever)를 처음 만드는 데 서버(t3.micro)에서 시간이 걸린다.
     앱이 뜬 뒤 첫 방문 때 뒤에서 미리 만들어, 질문하는 사람이 기다리지 않게 한다."""
     def build():
         try:
-            keyword_search.search(["보험"], DEFAULT_SOURCE, 1)
+            rag.warm_up(DEFAULT_SOURCE)
         except Exception:
             pass  # 미리 못 만들어도 첫 질문 때 다시 만든다
     threading.Thread(target=build, daemon=True).start()

@@ -190,19 +190,18 @@ def build_index(articles, source, on_progress=None):
     """
     import chromadb
     from dotenv import load_dotenv
-    from openai import OpenAI
+    from langchain_openai import OpenAIEmbeddings
 
     load_dotenv(BASE_DIR / ".env")
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError(".env 파일에 OPENAI_API_KEY가 없습니다.")
 
-    client = OpenAI()
+    embedder = OpenAIEmbeddings(model=EMBEDDING_MODEL)
     texts = [a["text"] for a in articles]
     embeddings = []
     for start in range(0, len(texts), BATCH_SIZE):
         batch = [embed_text(a)[:MAX_EMBED_CHARS] for a in articles[start:start + BATCH_SIZE]]
-        response = client.embeddings.create(model=EMBEDDING_MODEL, input=batch)
-        embeddings.extend(item.embedding for item in response.data)
+        embeddings.extend(embedder.embed_documents(batch))
         if on_progress:
             on_progress(min(start + BATCH_SIZE, len(texts)) / len(texts))
 
