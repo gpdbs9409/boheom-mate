@@ -15,13 +15,14 @@ from boheom_mate.core import consultation
 from boheom_mate.core import memory as session_memory
 from boheom_mate.core import policy_rules
 from boheom_mate.core import rag
+from boheom_mate.integrations import hira_hospital
 from boheom_mate.integrations import mcp_client
 from boheom_mate.store import outbox
 
 DISCLAIMER = calculator.DISCLAIMER
 
 # 디스패처가 잡아 {"error": 메시지}로 돌려주는 예외. 외부 호출 도구를 더할 때 그 오류(HiraError)를 더한다
-CAUGHT_ERRORS = (ValueError, TypeError, sqlite3.Error, outbox.OutboxError)
+CAUGHT_ERRORS = (ValueError, TypeError, hira_hospital.HiraError, sqlite3.Error, outbox.OutboxError)
 
 
 def _new_turn():
@@ -608,6 +609,57 @@ def run_term(args, ctx):
     return result
 
 
+# ---- classify_hospital --------------------------------------------------------------------------
+
+HOSPITAL_RULES = """[병원 종류 확인]
+- 금액 계산에 병원 종류가 필요한데 사용자가 병원 이름만 말하고 의원/종합병원 구분을 모를 때만 classify_hospital을 부르세요.
+  병원 종류를 이미 말했으면 쓰지 마세요. 결과의 calculator_hospital은 calculate_payout의 hospital에 넣으세요.
+- need가 choose_candidate면 candidates 중 어느 곳인지, ask_hospital_type이면 병원 종류를 한 번 물어보세요.
+"""
+
+HOSPITAL_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "classify_hospital",
+        "description": "사용자가 병원 이름을 말했지만 의원/종합병원 구분을 모를 때만. 병원 이름만 외부 공공 API로 조회한다.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "hospital_name": {"type": "string", "description": "사용자가 말한 병원 이름(예: 서울아산병원)"},
+            },
+            "required": ["hospital_name"],
+        },
+    },
+}
+HOSPITAL_MAX_CANDIDATES = 5
+
+
+def run_hospital(args, ctx):
+    """design.md 9.8: 병원 이름만 조회해 1건이면 계산기 병원 구분으로 바꾼다.
+    약관 조항이 아니므로 근거에 넣지 않고, 응답을 메모(memory_updates)에 넣지 않는다(Req 11.4)."""
+    from boheom_mate.core import hospital
+    try:
+        found = hira_hospital.search(args.get("hospital_name"))
+    except hira_hospital.HiraError:
+        found = {"total": 0, "items": []}
+    items = found["items"]
+    candidates = [{"name": i["name"], "class_name": i["class_name"], "addr": i["addr"]}
+                  for i in items[:HOSPITAL_MAX_CANDIDATES]]
+    calculator_hospital, need = None, "ask_hospital_type"
+    if found["total"] >= 2 and items:
+        need = "choose_candidate"
+    elif found["total"] == 1 and items:
+        class_name = items[0]["class_name"] or hira_hospital.CLASS_CODES.get(items[0]["class_code"], "")
+        if class_name:
+            calculator_hospital, need = hospital.to_calculator_hospital(class_name), None
+    return {"candidates": candidates, "calculator_hospital": calculator_hospital, "need": need,
+            "source_note": hira_hospital.SOURCE_NOTE}
+
+
+def _hospital_available(ctx):
+    return hira_hospital.has_key()
+
+
 # ---- request_consultation -----------------------------------------------------------------------
 # 회신 이메일이 새지 않도록 이 어댑터는 print·logging을 쓰지 않는다(Req 11.6, 14.6).
 CONSULT_NOTIFY = True            # 평가(run_chat)는 False로 끈다
@@ -711,6 +763,8 @@ REGISTRY = [
          available=_claim_available, run=run_claim, disclaimer=True),
     Tool(name="explain_term", schema=TERM_TOOL, rules=TERM_RULES,
          available=_term_available, run=run_term, disclaimer=False),
+    Tool(name="classify_hospital", schema=HOSPITAL_TOOL, rules=HOSPITAL_RULES,
+         available=_hospital_available, run=run_hospital, disclaimer=False),
     Tool(name="request_consultation", schema=CONSULT_TOOL, rules=CONSULT_RULES,
          available=lambda ctx: True, run=run_consultation, disclaimer=False),
 ]

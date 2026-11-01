@@ -54,6 +54,7 @@ else:
     (tab_questions,) = st.tabs(["상담하기"])
 
 DEFAULT_SOURCE = chat.CALCULATOR_SOURCE  # 첫 방문 때 미리 색인을 만들 약관
+HOSPITAL_LOOKUP_NOTE = "병원 이름 조회는 외부 공공 API(건강보험심사평가원)로 전송됩니다."  # classify_hospital이 bind됐을 때
 DAILY_LIMIT = int(os.getenv("DAILY_QUESTION_LIMIT", "100"))  # 모든 방문자를 합친 하루 질문 수
 
 # 로그인이 없으므로 브라우저 세션마다 id를 하나 만들어, 대화를 세션별로 나눈다
@@ -182,6 +183,8 @@ def render_questions():
         return
     if not chat.calculator_available(source):
         st.caption("이 상품은 약관에서 계산 기준을 확인하지 못해 보험금 계산 없이 약관 내용만 안내해 드려요.")
+    if "classify_hospital" in chat.bound_tool_names(source):  # HIRA 키가 있을 때만 bind된다
+        st.caption(HOSPITAL_LOOKUP_NOTE)
 
     messages = question_store.list_messages(session_id)
     memory = question_store.get_memory(session_id)
