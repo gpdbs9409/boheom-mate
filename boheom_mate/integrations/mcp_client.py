@@ -4,8 +4,8 @@
 넣은 뒤 확인(아무것도 보내지 않음): .venv/bin/python -m boheom_mate.integrations.mcp_client --check
 
 안전 규칙(로그인 없는 방문자가 쓰는 앱이라 운영자 계정 권한을 함부로 쓰지 않게 한다):
-- 행동마다 허용한 "메시지 보내기 / 이슈 만들기" 도구만 부른다. 서버가 다른 도구를 줘도 쓰지 않는다.
-- LLM에게 MCP 도구를 주지 않는다. 사용자가 화면에서 미리보기를 확인하고 '보내기'를 눌렀을 때만 execute()가 보낸다.
+- 행동마다 허용한 "메시지 보내기" 도구만 부른다. 서버가 다른 도구를 줘도 쓰지 않는다.
+- 상담 접수 뒤 코드가 만든 고정 형식 알림만 보낸다. LLM에게 MCP 도구를 주지 않는다.
 - 보낼 곳(Slack 채널)은 환경변수로 고정한다. LLM 인자로 받지 않는다.
 - 토큰은 .env에서만 읽고, 오류 메시지·로그·화면에 넣지 않는다.
 
@@ -47,8 +47,8 @@ def _slack_values(draft):
 # 행동 → 서버, 부를 수 있는 도구 이름 후보(앞에서부터, 모두 '보내기/만들기' 하나의 일만 하는 도구),
 #        값을 도구 입력 칸 이름에 맞추는 별칭. Slack은 도구·입력 칸 이름이 문서에 없어서 후보를 둔다.
 ACTIONS = {
-    "handoff": {
-        "server": "slack", "title": "설계사에게 상담 요청(Slack)", "values": _slack_values,
+    "consult_notice": {
+        "server": "slack", "title": "새 상담 접수 알림(Slack)", "values": _slack_values,
         "tools": ["slack_send_message", "send_message", "chat_post_message", "post_message"],
         "aliases": {"channel": ["channel_id", "channel", "conversation_id"],
                     "text": ["message", "text", "content", "markdown_text"]},
@@ -90,9 +90,9 @@ async def _connect_tool(server_name, server, action):
     return tools, _pick_tool(tools, action["tools"])
 
 
-def _run(coro, label):
+def _run(coro, label, timeout=None):
     try:
-        return asyncio.run(asyncio.wait_for(coro, TIMEOUT_SECONDS))
+        return asyncio.run(asyncio.wait_for(coro, TIMEOUT_SECONDS if timeout is None else timeout))
     except MCPError:
         raise
     except KeyError:
@@ -103,8 +103,9 @@ def _run(coro, label):
         raise MCPError(f"{label} 연결 또는 호출에 실패했습니다(토큰·권한을 확인하세요)") from None
 
 
-def execute(action_name, draft, servers=None):
-    """사용자가 화면에서 확인한 초안을 보낸다. 허용 도구 후보 밖의 도구는 절대 부르지 않는다."""
+def execute(action_name, draft, servers=None, timeout=None):
+    """코드가 만든 알림 초안을 보낸다. 허용 도구 후보 밖의 도구는 절대 부르지 않는다.
+    timeout(초)이 있으면 그 시간 안에 끝나지 않을 때 MCPError(기본 TIMEOUT_SECONDS)."""
     servers = SERVERS if servers is None else servers
     action = ACTIONS[action_name]
     if not _server_ready(action["server"], servers):
@@ -118,7 +119,7 @@ def execute(action_name, draft, servers=None):
         args = _fit_args(action["values"](draft), action["aliases"], set(getattr(tool, "args", {}) or {}))
         return await tool.ainvoke(args)
 
-    return _run(go(), server["label"])
+    return _run(go(), server["label"], timeout)
 
 
 def check(servers=None):

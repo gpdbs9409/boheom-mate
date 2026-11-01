@@ -180,3 +180,13 @@ def evidence_label_md(group):
         rest = plain[len(section) + 3:]
         return f":red[**{section}**] · {rest}"
     return f":red[**{plain}**]"
+
+
+def consultation_lines(c, retention_hours):
+    """상담 접수 표시 문구(코드가 만들고 LLM 답변과 섞지 않는다)."""
+    return {
+        "title": f"상담 신청이 접수됐어요(접수번호 {c['receipt_number']}). {c.get('mock_notice') or '실제 메일은 보내지 않는 데모입니다'}",
+        "rows": [("문의 요약", c["summary"]), ("회신 이메일", c["reply_email"]),
+                 ("선호 시간대", c.get("preferred_time") or "없음")],
+        "caption": f"상담 신청 내용(문의 요약·회신 이메일)은 이 기기의 데모 보관함에 {retention_hours}시간 보관된 뒤 삭제됩니다",
+    }

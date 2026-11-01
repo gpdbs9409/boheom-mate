@@ -23,8 +23,7 @@ from boheom_mate.ui import display
 from boheom_mate.core import ingest
 from boheom_mate.core import keyword_search
 from boheom_mate.core import memory as session_memory
-from boheom_mate.core import outbound
-from boheom_mate.integrations import mcp_client
+from boheom_mate.store import outbox
 from boheom_mate.store import products
 from boheom_mate.store import question_store
 from boheom_mate.core import rag
@@ -76,6 +75,14 @@ def _warm_up():
 
 
 _warm_up()
+@st.cache_resource
+def _purge_outbox():
+    """앱이 뜰 때 한 번, 보관 기간이 지난 상담 신청 파일을 지운다."""
+    try:
+        outbox.purge_expired()
+    except Exception:
+        pass  # 지우지 못해도 화면은 띄운다
+_purge_outbox()
 
 
 # ---------- 상담하기 ----------
@@ -123,6 +130,17 @@ def render_message(m):
         if m.get("summary"):
             st.caption(f"질문 요지: {m['summary']}")
         render_evidence(m.get("evidence") or [])
+        consultation = st.session_state.get("consultations", {}).get(m.get("id"))
+        if consultation:
+            render_consultation(consultation)
+def render_consultation(c):
+    """상담 접수 표시. 문구는 코드가 만들고 LLM 답변과 섞지 않는다."""
+    lines = display.consultation_lines(c, c.get("retention_hours", outbox.RETENTION_HOURS))
+    with st.container(border=True):
+        st.markdown(f"**{lines['title']}**")
+        for label, value in lines["rows"]:
+            st.markdown(f"- {label}: {value}")
+        st.caption(lines["caption"])
 
 
 def pick_product(sources):
@@ -151,44 +169,6 @@ def pick_product(sources):
         st.info(f"'{product['product']}' 약관은 아직 준비 중이에요. 준비된 상품을 골라 주세요.")
         return None
     return product["source"]
-
-
-def start_outbound(action, messages, source, memory, reason=""):
-    """보내기 미리보기를 만든다. 실제 전송은 render_outbound에서 사용자가 버튼을 눌렀을 때만 한다."""
-    last_q = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
-    draft = outbound.handoff_draft(last_q, session_memory.describe(memory), source, reason)
-    for key in ("outbound_text", "outbound_agree"):  # 새 초안이 이전 입력칸 값에 덮이지 않게
-        st.session_state.pop(key, None)
-    st.session_state.outbound = {"action": action, "text": outbound.preview_text(action, draft)}
-
-
-def render_outbound():
-    """Slack(MCP)으로 보내기 전 미리보기. 사용자가 내용을 고치고 동의해야만 보낸다."""
-    pending = st.session_state.get("outbound")
-    if not pending:
-        return
-    action = pending["action"]
-    sent = st.session_state.get("outbound_sent", 0)
-    with st.container(border=True):
-        st.markdown(f"**{mcp_client.ACTIONS[action]['title']} 미리보기**")
-        st.caption("아래 내용이 그대로 전송됩니다. 병명·연락처 같은 개인정보는 지우거나 고쳐 주세요. "
-                   "주민번호·전화번호·이메일은 자동으로 가립니다.")
-        text = st.text_area("보낼 내용", pending["text"], height=220, key="outbound_text")
-        agree = st.checkbox("내용을 확인했고, 이 내용을 보내는 데 동의합니다.", key="outbound_agree")
-        col_send, col_cancel = st.columns(2)
-        if col_send.button("보내기", type="primary", disabled=not agree or sent >= outbound.MAX_SENDS_PER_SESSION):
-            try:
-                mcp_client.execute(action, outbound.from_preview(action, text))
-                st.session_state.outbound_sent = sent + 1
-                st.session_state.outbound = None
-                st.success("보냈어요.")
-            except mcp_client.MCPError as e:
-                st.error(f"보내지 못했어요: {e}")
-        if col_cancel.button("취소"):
-            st.session_state.outbound = None
-            st.rerun()
-        if sent >= outbound.MAX_SENDS_PER_SESSION:
-            st.caption(f"이 대화에서는 {outbound.MAX_SENDS_PER_SESSION}번까지만 보낼 수 있어요.")
 
 
 def render_questions():
@@ -227,15 +207,6 @@ def render_questions():
                 st.rerun()
     for m in messages:
         render_message(m)
-    actions = mcp_client.available_actions()
-    if messages and actions and not st.session_state.get("outbound"):
-        cols = st.columns(len(actions))
-        for col, action in zip(cols, actions):
-            if col.button("설계사와 상담하고 싶어요", key=f"start_{action}"):
-                start_outbound(action, messages, source, memory)
-                st.rerun()
-    render_outbound()
-
     remaining = max(DAILY_LIMIT - question_store.used_today(), 0)
     text = st.chat_input(f"질문을 입력하세요 (오늘 남은 질문 {remaining}개)") or st.session_state.pop("pending", None)
     if not text or not text.strip():
@@ -252,15 +223,18 @@ def render_questions():
             try:
                 # 이번 질문에서 말한 사실(가입 시기 등)을 먼저 메모에 넣어, 같은 턴의 계산에도 쓰게 한다
                 memory = session_memory.update(memory, text)
-                result = chat.reply(messages + [{"role": "user", "content": text}], source, memory)
+                result = chat.reply(messages + [{"role": "user", "content": text}], source, memory,
+                                    session_id=session_id)
             except Exception as e:
                 st.error(f"답변을 만들지 못했습니다: {e}")
                 return
     question_store.add_message(session_id, "user", text, source)
-    question_store.add_message(
+    message_id = question_store.add_message(
         session_id, "assistant", result["content"], source,
         result["evidence"], result["calculation"], result["summary"],
     )
+    if result.get("consultation"):
+        st.session_state.setdefault("consultations", {})[message_id] = result["consultation"]
     if result["calculation"]:
         memory = session_memory.merge_calculation(memory, result["calculation"].get("inputs"))
     question_store.save_memory(session_id, memory)

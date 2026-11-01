@@ -6,17 +6,21 @@
 """
 import sqlite3
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Callable
 
 from boheom_mate.core import calculator
+from boheom_mate.core import consultation
 from boheom_mate.core import memory as session_memory
 from boheom_mate.core import policy_rules
 from boheom_mate.core import rag
+from boheom_mate.integrations import mcp_client
+from boheom_mate.store import outbox
 
 DISCLAIMER = calculator.DISCLAIMER
 
-# 디스패처가 잡아 {"error": 메시지}로 돌려주는 예외. 외부 호출 도구를 더할 때 그 오류(HiraError, OutboxError)를 더한다
-CAUGHT_ERRORS = (ValueError, TypeError, sqlite3.Error)
+# 디스패처가 잡아 {"error": 메시지}로 돌려주는 예외. 외부 호출 도구를 더할 때 그 오류(HiraError)를 더한다
+CAUGHT_ERRORS = (ValueError, TypeError, sqlite3.Error, outbox.OutboxError)
 
 
 def _new_turn():
@@ -223,6 +227,91 @@ def run_calculate(args, ctx):
     return {k: v for k, v in result.items() if k != "rules_used"}
 
 
+# ---- request_consultation -----------------------------------------------------------------------
+# 회신 이메일이 새지 않도록 이 어댑터는 print·logging을 쓰지 않는다(Req 11.6, 14.6).
+CONSULT_NOTIFY = True            # 평가(run_chat)는 False로 끈다
+NOTICE_TIMEOUT_SECONDS = 5
+CONSULT_RULES = """[상담 신청]
+- 사용자가 사람 상담사와 상담하고 싶다고 직접 말한 경우에만 request_consultation을 부르세요.
+  상담 신청을 위해 되물은 값(이메일 등)을 사용자가 다음 턴에 답한 경우도 같은 요청으로 봅니다.
+  약관 질문, 금액 질문, 불만 표현만으로는 부르지 마세요. 먼저 상담 신청을 권하며 부르지 마세요.
+- 문의 요약이나 회신 이메일이 없으면 부르지 말고 한 번에 짧게 물어보세요.
+  이메일은 사용자가 대화에 직접 쓴 주소만 그대로 넣고, 지어내거나 고치지 마세요.
+- 약관에서 확인할 수 없어 답하지 못했으면 답변 끝에 "원하시면 상담사 상담을 신청할 수 있어요" 한 줄만 붙일 수 있습니다.
+  그 턴에는 request_consultation을 부르지 마세요.
+- 결과에 need가 있으면 그 값을 다시 물어보세요. error가 limit_reached면 message를 그대로 전하세요.
+  accepted=false이고 다른 error면 "접수하지 못했어요"라고 안내하세요.
+- 접수되면 접수번호와 "실제 메일은 보내지 않는 데모"임을 짧게 알리세요. 접수 내용은 화면에 따로 보입니다.
+"""
+CONSULT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "request_consultation",
+        "description": ("사용자가 사람 상담사와 상담하고 싶다고 직접 요청했을 때만 상담 신청을 접수한다. "
+                        "실제 메일은 보내지 않는 데모다. 약관·금액 질문에는 쓰지 않는다."),
+        "parameters": {
+            "type": "object",
+            "required": ["summary", "reply_email"],
+            "properties": {
+                "summary": {"type": "string",
+                            "description": "대화에서 정리한 문의 요약(상담사에게 묻고 싶은 내용). 주민번호·전화번호는 넣지 않는다"},
+                "reply_email": {"type": "string",
+                                "description": "사용자가 대화에 직접 쓴 회신 이메일 주소를 그대로. 지어내거나 고치지 않는다"},
+                "preferred_time": {"type": "string",
+                                   "description": "사용자가 말한 상담 선호 시간대. 말하지 않았으면 넣지 않는다"},
+            },
+        },
+    },
+}
+CONSULT_ARGS = ("summary", "reply_email", "preferred_time")
+def _notify(request):
+    """Outbox_File을 쓴 뒤 고정 형식 알림을 보낸다. 설정 없음·MCPError(시간 초과 포함)는 False."""
+    if not CONSULT_NOTIFY or "consult_notice" not in mcp_client.available_actions():
+        return False
+    text = consultation.notice_text(request["receipt_number"], request["product_name"], request["summary"])
+    try:
+        mcp_client.execute("consult_notice", {"text": text}, timeout=NOTICE_TIMEOUT_SECONDS)
+        return True
+    except mcp_client.MCPError:
+        return False  # 오류 문구는 Tool_Result에 넣지 않는다(토큰 비노출)
+def run_consultation(args, ctx):
+    """design.md 9.10 실행 순서: 한도 → 요약 → 이메일 있음 → 사용자 원문에 있음 → 형식 → Outbox 쓰기 → 알림."""
+    args = {k: args.get(k) for k in CONSULT_ARGS}  # 스키마 밖 인자(to, source 등)는 무시한다
+    outbox.purge_expired()
+    if outbox.count_for_session(ctx.session_id) >= consultation.CONSULTATION_LIMIT:
+        return {"accepted": False, "error": "limit_reached", "message": consultation.LIMIT_MESSAGE}
+    summary = consultation.clean_text(args["summary"], consultation.MAX_SUMMARY_CHARS)
+    if not summary:
+        return {"accepted": False, "need": "summary"}
+    raw_email = args["reply_email"]
+    reply_email = raw_email.strip() if isinstance(raw_email, str) else ""
+    if not reply_email:
+        return {"accepted": False, "need": "reply_email"}
+    if not consultation.email_in_messages(reply_email, ctx.user_messages):
+        return {"accepted": False, "need": "reply_email", "reason": "사용자가 직접 입력한 이메일만 쓸 수 있음"}
+    if not consultation.is_valid_email(reply_email):
+        return {"accepted": False, "need": "valid_reply_email"}
+    preferred_time = consultation.clean_text(args["preferred_time"], consultation.MAX_PREFERRED_TIME_CHARS) or None
+    now = datetime.now(consultation.KST)
+    try:
+        request = outbox.write(
+            lambda receipt: consultation.build_request(
+                summary=summary, reply_email=reply_email, preferred_time=preferred_time,
+                source=ctx.source, session_id=ctx.session_id, now=now, receipt=receipt),
+            make_receipt=lambda: consultation.new_receipt(now), now=now)
+    except outbox.OutboxError as e:
+        return {"accepted": False, "error": str(e)}
+    record = {
+        "receipt_number": request["receipt_number"],
+        "summary": request["summary"],
+        "reply_email": request["reply_email"],
+        "preferred_time": request["preferred_time"],
+        "mock_notice": consultation.MOCK_NOTICE,
+        "retention_hours": outbox.RETENTION_HOURS,
+        "notified": _notify(request),
+    }
+    ctx.turn["consultation"] = record  # 한 턴에 두 번 접수되면 마지막 것
+    return {"accepted": True, **record}
 # ---- 레지스트리와 디스패처 --------------------------------------------------------------------------
 
 REGISTRY = [
@@ -231,6 +320,8 @@ REGISTRY = [
     Tool(name="calculate_payout", schema=CALCULATE_TOOL, rules=CALCULATE_RULES,
          available=lambda ctx: bool((ctx.rule_set or {}).get("ok")), run=run_calculate, disclaimer=True,
          schema_for=lambda ctx: calculate_schema((ctx.rule_set or {}).get("profile"))),
+    Tool(name="request_consultation", schema=CONSULT_TOOL, rules=CONSULT_RULES,
+         available=lambda ctx: True, run=run_consultation, disclaimer=False),
 ]
 
 

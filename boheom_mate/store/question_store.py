@@ -53,9 +53,10 @@ def _now():
 def add_message(session_id, role, content, source=None, evidence=None, calculation=None, summary=None):
     """role: "user" 또는 "assistant"
     evidence: 근거 조항 목록 [{"section", "article_no", "title", "text"}, ...]
-    calculation: calculator.calculate 결과 + 계산에 쓴 값(inputs)"""
+    calculation: calculator.calculate 결과 + 계산에 쓴 값(inputs)
+    반환: 새 행 id"""
     with _connect() as conn:
-        conn.execute(
+        cur = conn.execute(
             """INSERT INTO chat_messages (session_id, role, content, source, evidence, calculation, summary, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
@@ -69,6 +70,7 @@ def add_message(session_id, role, content, source=None, evidence=None, calculati
                 _now().strftime("%Y-%m-%d %H:%M"),
             ),
         )
+    return cur.lastrowid
 
 
 def list_messages(session_id):

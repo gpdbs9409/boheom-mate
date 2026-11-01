@@ -1,18 +1,17 @@
-"""밖으로 보낼 글(Slack 상담 요청) 초안을 만든다. 외부 호출은 하지 않는다.
+"""상담 신청 요약·알림에 쓰는 개인정보 가리기. 외부 호출은 하지 않는다.
 
-초안은 화면에서 사용자가 읽고 고친 뒤에만 보낸다(integrations.mcp_client.execute).
-연락처·주민번호처럼 눈에 띄는 개인정보는 여기서 가린다. 병명은 상담에 필요할 수 있어 가리지 않고,
-화면에서 "병명 등 민감정보는 지워 주세요" 안내를 띄운다.
+연락처·주민번호·이메일처럼 눈에 띄는 개인정보를 가린다. 병명은 상담에 필요할 수 있어 가리지 않는다.
 """
 import re
 
-MAX_SENDS_PER_SESSION = 3
-FOOTER = "\n\n_보험메이트 사용자가 내용을 확인하고 보낸 글입니다._"
-
+RRN_PATTERN = re.compile(r"\d{6}\s*-\s*[1-8]\d{6}")
+PHONE_PATTERN = re.compile(r"01[016789][\s.-]?\d{3,4}[\s.-]?\d{4}")
+# 로컬 파트는 상담 회신 이메일 검증(consultation.is_valid_email)이 받는 문자까지 가린다
+EMAIL_TEXT_PATTERN = re.compile(r"[\w!#$%&'*+/=?^`{|}~.-]+@[\w-]+(?:\.[\w-]+)+")
 _PATTERNS = [
-    (re.compile(r"\d{6}\s*-\s*[1-8]\d{6}"), "[주민번호 가림]"),
-    (re.compile(r"01[016789][\s.-]?\d{3,4}[\s.-]?\d{4}"), "[전화번호 가림]"),
-    (re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"), "[이메일 가림]"),
+    (RRN_PATTERN, "[주민번호 가림]"),
+    (PHONE_PATTERN, "[전화번호 가림]"),
+    (EMAIL_TEXT_PATTERN, "[이메일 가림]"),
 ]
 
 
@@ -21,23 +20,3 @@ def scrub(text):
     for pattern, mask in _PATTERNS:
         text = pattern.sub(mask, text or "")
     return text
-
-
-def handoff_draft(question, remembered, source, reason=""):
-    """설계사 상담 요청용 Slack 메시지 초안: {"text"}. remembered는 memory.describe 결과(줄 목록)."""
-    lines = [f"*상담 요청* ({source})", f"질문: {scrub(question).strip()}"]
-    if remembered:
-        lines.append("대화에서 확인한 정보:\n" + "\n".join(f"• {scrub(r)}" for r in remembered))
-    if reason:
-        lines.append(f"요청 내용: {scrub(reason).strip()}")
-    return {"text": "\n".join(lines) + FOOTER}
-
-
-def preview_text(action_name, draft):
-    """화면 미리보기·수정 칸에 넣을 글."""
-    return draft["text"]
-
-
-def from_preview(action_name, text):
-    """사용자가 고친 미리보기 글을 다시 초안으로. 고친 글도 한 번 더 가린다."""
-    return {"text": scrub(text).strip()}

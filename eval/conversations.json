@@ -44,5 +44,20 @@
    "note": "간편가입 보통약관 제4조(보상하지 않는 사항)에 도수치료·체외충격파·증식치료가 있어 도수치료 100,000원은 0원 항목. 다른 비용 없음 → 총 0원",
    "turns": [
     {"user": "간편가입인데 동네 의원에 1번 통원해서 비급여 도수치료 10만 원 받았어요. 다른 비용은 없어요. 얼마 받아요?", "expect": {"calc": 0, "not_covered": true}}
+  ]},
+  {"id": "C20", "group": "tools", "name": "상담 신청: 이메일 되묻기 → 접수",
+   "note": "① 이메일이 없으니 되묻고 도구를 부르지 않는다 ② 요약과 이메일을 주면 request_consultation으로 접수한다",
+   "turns": [
+    {"user": "직접 상담사에게 문의하고 싶어요", "expect": {"ask": true, "no_tool": ["request_consultation"]}},
+    {"user": "도수치료 비용이 보장되는지 상담받고 싶어요. 답장은 hong.gildong@example.com으로 주세요", "expect": {"tool": "request_consultation", "consultation": true}}
+  ]},
+  {"id": "C21", "group": "tools", "name": "금액 질문에는 상담 신청을 하지 않는다",
+   "turns": [
+    {"user": "도수치료 10만 원 냈는데 얼마 돌려받아요?", "expect": {"tool": "calculate_payout", "no_tool": ["request_consultation"]}}
+  ]},
+  {"id": "C22", "group": "tools", "name": "답할 수 없는 질문에도 상담 신청 도구를 먼저 부르지 않는다",
+   "note": "Unanswerable_Reply 끝에 상담 안내 한 줄은 괜찮지만 request_consultation은 부르지 않는다(Requirement 13.2)",
+   "turns": [
+    {"user": "반려견 동물병원 진료비도 이 실손보험으로 보상돼요?", "expect": {"not_covered": true, "calc": null, "no_tool": ["request_consultation"]}}
   ]}
 ]

@@ -34,7 +34,9 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -44,12 +46,13 @@ sys.path.insert(0, str(EVAL_DIR.parent))
 
 from boheom_mate.ui import chat, tools  # noqa: E402
 from boheom_mate.core import memory as session_memory  # noqa: E402
+from boheom_mate.store import outbox  # noqa: E402
 
 JARGON = re.compile(r"비급여|(?<!비)급여|본인부담금|공제|통원|산정특례|상급병실료|요양급여")
 NOT_COVERED = re.compile(r"확인할 수 없|확인이 어렵|보상하지 않|보상되지 않|대상이 아[니닙]|해당하지 않")
 ASK = re.compile(r"\?|알려 ?주세요|알려 ?주시")
 # core/consultation.py가 생기기 전에 쓰는 같은 형식(C-YYYYMMDD-XXXXXX, 0·O·1·I 뺀 32자)
-FALLBACK_RECEIPT_PATTERN = r"C-\d{8}-[A-HJ-NP-Z2-9]{6}"
+FALLBACK_RECEIPT_PATTERN = re.compile(r"C-\d{8}-[A-HJ-NP-Z2-9]{6}")
 DEFAULT_FALLBACK = {"ask": True}
 
 
@@ -94,6 +97,7 @@ def tool_selection_error(expect, result):
 
 
 def _receipt_pattern():
+    """접수번호 정규식(컴파일된 re.Pattern). core/consultation.RECEIPT_PATTERN을 쓴다."""
     try:
         from boheom_mate.core.consultation import RECEIPT_PATTERN
         return RECEIPT_PATTERN
@@ -138,7 +142,7 @@ def check(expect, result):
         receipt = (consultation or {}).get("receipt_number") or ""
         if not consultation:
             fails.append("상담 신청이 접수되지 않음")
-        elif not re.fullmatch(_receipt_pattern(), receipt):
+        elif not _receipt_pattern().fullmatch(receipt):
             fails.append(f"접수번호 형식이 다름({receipt})")
     return fails
 
@@ -214,7 +218,18 @@ def main():
         rescore(args.rescore)
         return
     chat.PLAIN_LANGUAGE = not args.no_plain
+    # 상담 신청은 임시 outbox에 쓰고 끝나면 지운다. Slack 알림은 보내지 않는다
+    tmp_outbox = tempfile.mkdtemp(prefix="eval-outbox-")
+    saved_outbox, saved_notify = outbox.OUTBOX_DIR, tools.CONSULT_NOTIFY
+    outbox.OUTBOX_DIR, tools.CONSULT_NOTIFY = Path(tmp_outbox), False
+    try:
+        run(args)
+    finally:
+        outbox.OUTBOX_DIR, tools.CONSULT_NOTIFY = saved_outbox, saved_notify
+        shutil.rmtree(tmp_outbox, ignore_errors=True)
 
+
+def run(args):
     mode = environment_mode()
     scenarios = load_scenarios()
     rows, passed, total, jargon, seconds = [], 0, 0, [], []
@@ -233,7 +248,7 @@ def main():
                 memory = session_memory.update(memory, turn["user"])
             history.append({"role": "user", "content": turn["user"]})
             start = time.time()
-            result = chat.reply(history, source, memory) if sc.get("memory") else chat.reply(history, source)
+            result = chat.reply(history, source, memory if sc.get("memory") else None, session_id=f"eval-{sc['id']}")
             seconds.append(time.time() - start)
             history.append({"role": "assistant", "content": result["content"], "calculation": result["calculation"]})
             if sc.get("memory"):

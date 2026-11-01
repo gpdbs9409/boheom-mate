@@ -125,21 +125,23 @@ def _model_history(history):
     return messages
 
 
-def reply(history, source, memory=None):
+def reply(history, source, memory=None, *, session_id=None):
     """history: [{"role": "user"|"assistant", "content": str, "calculation": dict|None}, ...] (마지막이 사용자 질문)
     memory: 이 대화의 상담 메모(core.memory). 프롬프트에 넣어 이미 말한 정보를 다시 묻지 않게 한다
     반환값: {"content": 답변, "evidence": [조항], "calculation": 계산 결과|None,
              "summary": 질문 요지|None, "searches": [GPT가 검색한 질문],
-             "tools": [이번 턴에 실행한 도구 이름(호출 순서)], "memory_updates": {도구가 남긴 메모 갱신}}
+             "tools": [이번 턴에 실행한 도구 이름(호출 순서)], "memory_updates": {도구가 남긴 메모 갱신},
+             "consultation": 이번 턴에 접수한 상담 신청|None}
+    session_id: 상담 접수 건수를 세는 세션 id. None이면 "no-session"
     도구 실행은 ui/tools.py의 레지스트리·디스패처가 맡는다.
     """
-    ctx = tools.make_ctx(source, memory, history)
+    ctx = tools.make_ctx(source, memory, history, session_id=session_id)
     bound = tools.bound_tools(ctx)
     llm = rag._llm.bind_tools(tools.schemas(bound, ctx))
     messages = [SystemMessage(content=_system_prompt(ctx, bound))] + _model_history(history)
 
     def _result(content):
-        keys = ("evidence", "calculation", "summary", "searches", "tools", "memory_updates")
+        keys = ("evidence", "calculation", "summary", "searches", "tools", "memory_updates", "consultation")
         return {"content": content, **{k: ctx.turn[k] for k in keys}}
 
     for _ in range(MAX_TOOL_ROUNDS):
