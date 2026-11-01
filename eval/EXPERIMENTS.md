@@ -450,3 +450,31 @@
 - 프롬프트 길이: 키가 없으면 도구가 붙지 않아 E17과 같다(기본형 3,826자, 간편가입 3,772자). 키 있는 모드의 증가분은 확인하지 못했다.
 - 평가 뒤 `state/outbox/` 파일 0개.
 - 판정: 합격선(거절 100%, 검색 94% 이상, 기존 11/11, 기존 도구 선택 오류 0)을 지켜 채택한다. 테스트 28개 파일 통과(`smoke_*.py` 제외).
+- 단계 8에서 제거(E19). 같은 단계 7의 `lookup_kcd`도 함께 제거했다.
+
+## E19 classify_hospital·lookup_kcd 제거 (채택)
+- 결과: `results/20261101_223351_dev_full.json`(답변 포함), `results/chat_20261101_223213.json`(채팅)
+- 가설: 키·색인이 없어 실제로 쓰이지 않는 도구 2개(`classify_hospital`, `lookup_kcd`)를 빼도 품질이 E18과 같다.
+- 바꾼 것(단계 8, 16.1~16.4):
+  - 16.1 `core/hospital.py`, `integrations/hira_hospital.py`, `store/kcd_index.py`, `jobs/build_kcd_index.py` 삭제. `ui/tools.py`에서 두 도구의 규칙·정의·실행 함수·사용 가능 조건·`REGISTRY` 항목과 `CAUGHT_ERRORS`의 `HiraError`·`sqlite3.Error` 제거(도구 8개). `app.py`의 HIRA 외부 전송 캡션 제거. `.gitignore`의 `data/kcd/` 줄 제거. `core/kcd.py`는 Rule_Set `code_ranges`용으로 남기고 docstring에 "도구 없음"을 적었다.
+  - 16.2 두 도구 관련 테스트 삭제·수정(`test_hospital_class.py`, `smoke_hira_hospital.py` 삭제, `test_app_tabs.py`·`test_tools_dispatch.py` 수정).
+  - 16.3 `conversations.json`에서 C15·C16 삭제, `run_chat.py`에서 `requires`·`expect_fallback`·`environment_mode`·결과의 `mode` 키 제거.
+  - 16.4 README를 도구 8개, Guardrail 그림, 정확도 표기(개발용 17문항 기준)로 다시 썼다.
+- 결과(dev 20문항 × 3회)
+
+| 지표 | E18 | E19 |
+|---|---|---|
+| 검색 적중 | 94% | 94% |
+| 상위 3 적중 | 82% | 82% |
+| MRR | 0.69 | 0.62 |
+| 거절 정확 | 100% | 100% |
+| 답변 키워드 | 98% | 100% |
+| 근거 일치율 | 35% | 35% |
+| 기존 11턴 통과 | 11/11 | 11/11 |
+| 도구 선택 오류(전체/기존) | 0/0 | 0/0 |
+| 전체 채팅 턴 통과 | 26/27 | 26/26 (답변당 어려운 용어 1.54개, 평균 4.0초) |
+
+- tools 그룹: C09~C14, C17~C22 모두 통과. C22(반려견)는 `search_terms`만 불렀고 이번에는 `NOT_COVERED` 채점도 통과했다. C15·C16은 문항을 지워 턴 수가 27 → 26이 됐다.
+- 프롬프트 길이: E18 키 없는 모드와 같다(기본형 3,826자, 간편가입 3,772자).
+- 평가 뒤 `state/outbox/` 파일 0개.
+- 판정: 합격선(거절 100%, 검색 94% 이상, 기존 11/11, 기존 도구 선택 오류 0)을 모두 지켜 채택한다. MRR 0.07 하락은 검색 코드 변경이 없어 답변 생성 회차 차이로 본다(E17과 같은 값). 테스트 27개 파일 통과(`smoke_*.py` 제외).

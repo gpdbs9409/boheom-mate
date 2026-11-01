@@ -2,6 +2,7 @@
 
 순수 함수만 둔다(Chroma·파일·네트워크 I/O 없음). 코드 범위 값은 소스에 적지 않고
 면책 조항(Exclusion_Article) 원문에서 정규식으로 뽑는다(Req 10.3).
+도구 없음, Rule_Set 면책 코드 범위용(policy_rules._supplements가 code_ranges를 만들 때 쓴다).
 """
 
 import re

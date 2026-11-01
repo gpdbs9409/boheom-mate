@@ -5,7 +5,6 @@ __pycache__/
 .DS_Store
 questions.db
 data/*.pdf
-data/kcd/
 state/
 
 # 로컬 전용(원격 저장소에 올리지 않음): AI 에이전트 작업 문서, 테스트

@@ -19,9 +19,6 @@
 - 어려운 용어: 괄호 밖에 쓴 약관 용어 수(급여, 비급여, 본인부담금, 공제, 통원, 산정특례, 상급병실료, 요양급여).
   쉬운 말로 바꾸고 괄호에 약관 용어를 넣은 경우는 세지 않는다. 낮을수록 좋다
 
-턴 키
-- requires: ["hira_key"] / ["kcd_index"]. 조건이 없는 환경이면 expect_fallback(생략 시 {"ask": true})으로 채점한다
-
 시나리오 키
 - group: "tools"면 새 도구 문항. 없으면 기존 문항(legacy, C01~C08)
 - memory: true면 앱처럼 턴마다 상담 메모를 갱신해 chat.reply에 넘긴다
@@ -32,7 +29,6 @@ calc 숫자 → tool calculate_payout, calc null → no_tool [calculate_payout],
 """
 import argparse
 import json
-import os
 import re
 import shutil
 import sys
@@ -54,7 +50,6 @@ NOT_COVERED = re.compile(r"확인할 수 없|확인이 어렵|보상하지 않|�
 ASK = re.compile(r"\?|(?:알려|보내|말씀해|적어|입력해|써) ?주(?:세요|시)")
 # core/consultation.py가 생기기 전에 쓰는 같은 형식(C-YYYYMMDD-XXXXXX, 0·O·1·I 뺀 32자)
 FALLBACK_RECEIPT_PATTERN = re.compile(r"C-\d{8}-[A-HJ-NP-Z2-9]{6}")
-DEFAULT_FALLBACK = {"ask": True}
 
 
 def jargon_count(text):
@@ -148,28 +143,6 @@ def check(expect, result):
     return fails
 
 
-def environment_mode():
-    """외부 API 키·로컬 색인이 있는지(bool만 기록한다)."""
-    try:
-        from boheom_mate.integrations import hira_hospital
-        hira_key = bool(hira_hospital.has_key())
-    except ImportError:
-        hira_key = bool(os.environ.get("HIRA_SERVICE_KEY"))
-    try:
-        from boheom_mate.store import kcd_index
-        kcd = bool(kcd_index.available())
-    except ImportError:
-        kcd = False
-    return {"hira_key": hira_key, "kcd_index": kcd}
-
-
-def effective_expect(turn, mode):
-    """requires 조건이 없는 환경이면 expect_fallback(생략 시 {"ask": true})으로 채점한다."""
-    if all(mode.get(need) for need in turn.get("requires", [])):
-        return turn["expect"], False
-    return turn.get("expect_fallback", DEFAULT_FALLBACK), True
-
-
 def turn_source(scenario, turn):
     return turn["expect"].get("source") or scenario.get("source") or chat.CALCULATOR_SOURCE
 
@@ -231,7 +204,6 @@ def main():
 
 
 def run(args):
-    mode = environment_mode()
     scenarios = load_scenarios()
     rows, passed, total, jargon, seconds = [], 0, 0, [], []
     legacy_passed = legacy_total = selection_errors = legacy_selection_errors = 0
@@ -241,7 +213,7 @@ def run(args):
         legacy = is_legacy(sc)
         print(f"\n[{sc['id']}] {sc['name']}")
         for turn in sc["turns"]:
-            expect, fallback = effective_expect(turn, mode)
+            expect = turn["expect"]
             source = turn_source(sc, turn)
             if source not in sources:
                 sources.append(source)
@@ -271,11 +243,11 @@ def run(args):
             jargon.append(words)
             called = tools_called(result)
             print(f"  {'OK  ' if not fails else 'FAIL'} {turn['user'][:30]} | 도구 {called}"
-                  + (" (대체 기대)" if fallback else "") + (" | 도구 선택 오류" if wrong_tool else "")
+                  + (" | 도구 선택 오류" if wrong_tool else "")
                   + f" | 어려운 용어 {words}개 | {seconds[-1]:.1f}초"
                   + (f" | {'; '.join(fails)}" if fails else ""))
             rows.append({"id": sc["id"], "group": sc.get("group"), "source": source, "user": turn["user"],
-                         "reply": result["content"], "fails": fails, "fallback": fallback,
+                         "reply": result["content"], "fails": fails,
                          "tool_selection_error": wrong_tool, "tools": called,
                          "jargon": words, "searches": result["searches"],
                          "calculation": result["calculation"] and {"inputs": result["calculation"]["inputs"],
@@ -289,12 +261,11 @@ def run(args):
         "legacy_tool_selection_errors": legacy_selection_errors,
         "jargon_per_reply": round(sum(jargon) / len(jargon), 2),
         "avg_seconds": round(sum(seconds) / len(seconds), 1),
-        "mode": mode,
         "prompt_chars": {source: prompt_chars(source) for source in sources},
     }
     print(f"\n턴 통과 {summary['turn_pass']} ({summary['turn_pass_rate']:.0%}) | "
           f"기존 문항 {summary['legacy_turn_pass']} | 도구 선택 오류 {selection_errors}턴(기존 {legacy_selection_errors}턴) | "
-          f"답변당 어려운 용어 {summary['jargon_per_reply']}개 | 평균 {summary['avg_seconds']}초 | 모드 {mode}")
+          f"답변당 어려운 용어 {summary['jargon_per_reply']}개 | 평균 {summary['avg_seconds']}초")
 
     out = EVAL_DIR / "results" / f"chat_{datetime.now():%Y%m%d_%H%M%S}.json"
     out.parent.mkdir(exist_ok=True)

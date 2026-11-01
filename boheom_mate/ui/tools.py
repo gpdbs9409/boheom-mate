@@ -5,26 +5,22 @@
 도구는 source를 인자로 받지 않고 Ctx.source를 쓴다. 근거는 ctx.add_evidence로 turn["evidence"]에 넣는다.
 """
 import re
-import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable
 
 from boheom_mate.core import calculator
 from boheom_mate.core import consultation
-from boheom_mate.core import kcd
 from boheom_mate.core import memory as session_memory
 from boheom_mate.core import policy_rules
 from boheom_mate.core import rag
-from boheom_mate.integrations import hira_hospital
 from boheom_mate.integrations import mcp_client
-from boheom_mate.store import kcd_index
 from boheom_mate.store import outbox
 
 DISCLAIMER = calculator.DISCLAIMER
 
-# 디스패처가 잡아 {"error": 메시지}로 돌려주는 예외. 외부 호출 도구를 더할 때 그 오류(HiraError)를 더한다
-CAUGHT_ERRORS = (ValueError, TypeError, hira_hospital.HiraError, sqlite3.Error, outbox.OutboxError)
+# 디스패처가 잡아 {"error": 메시지}로 돌려주는 예외. 외부 호출 도구를 더할 때 그 오류(예: OutboxError)를 더한다
+CAUGHT_ERRORS = (ValueError, TypeError, outbox.OutboxError)
 
 
 def _new_turn():
@@ -611,137 +607,6 @@ def run_term(args, ctx):
     return result
 
 
-# ---- classify_hospital --------------------------------------------------------------------------
-
-HOSPITAL_RULES = """[병원 종류 확인]
-- 금액 계산에 병원 종류가 필요한데 사용자가 병원 이름만 말하고 의원/종합병원 구분을 모를 때만 classify_hospital을 부르세요.
-  병원 종류를 이미 말했으면 쓰지 마세요. 결과의 calculator_hospital은 calculate_payout의 hospital에 넣으세요.
-- need가 choose_candidate면 candidates 중 어느 곳인지, ask_hospital_type이면 병원 종류를 한 번 물어보세요.
-"""
-
-HOSPITAL_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "classify_hospital",
-        "description": "사용자가 병원 이름을 말했지만 의원/종합병원 구분을 모를 때만. 병원 이름만 외부 공공 API로 조회한다.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "hospital_name": {"type": "string", "description": "사용자가 말한 병원 이름(예: 서울아산병원)"},
-            },
-            "required": ["hospital_name"],
-        },
-    },
-}
-HOSPITAL_MAX_CANDIDATES = 5
-
-
-def run_hospital(args, ctx):
-    """design.md 9.8: 병원 이름만 조회해 1건이면 계산기 병원 구분으로 바꾼다.
-    약관 조항이 아니므로 근거에 넣지 않고, 응답을 메모(memory_updates)에 넣지 않는다(Req 11.4)."""
-    from boheom_mate.core import hospital
-    try:
-        found = hira_hospital.search(args.get("hospital_name"))
-    except hira_hospital.HiraError:
-        found = {"total": 0, "items": []}
-    items = found["items"]
-    candidates = [{"name": i["name"], "class_name": i["class_name"], "addr": i["addr"]}
-                  for i in items[:HOSPITAL_MAX_CANDIDATES]]
-    calculator_hospital, need = None, "ask_hospital_type"
-    if found["total"] >= 2 and items:
-        need = "choose_candidate"
-    elif found["total"] == 1 and items:
-        class_name = items[0]["class_name"] or hira_hospital.CLASS_CODES.get(items[0]["class_code"], "")
-        if class_name:
-            calculator_hospital, need = hospital.to_calculator_hospital(class_name), None
-    return {"candidates": candidates, "calculator_hospital": calculator_hospital, "need": need,
-            "source_note": hira_hospital.SOURCE_NOTE}
-
-
-def _hospital_available(ctx):
-    return hira_hospital.has_key()
-
-
-# ---- lookup_kcd ---------------------------------------------------------------------------------
-
-KCD_RULES = """[질병코드 대조]
-- 사용자가 이번 대화에서 직접 말한 병명·질병코드가 약관 면책 대상인지 물을 때만 lookup_kcd를 부르세요. 병명을 먼저 묻지 마세요.
-- matches만으로 보상되지 않는다고 단정하지 말고 exclusions_check와 함께 안내하세요.
-  label이 "면책 예외(보상 가능성 있음)"인 매치는 면책으로 안내하지 마세요. warning은 그대로 전하세요.
-- found=false면 코드 대조 없이 exclusions_check로만 안내하세요.
-"""
-
-KCD_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "lookup_kcd",
-        "description": "사용자가 이번 대화에서 직접 말한 병명·질병코드의 면책 코드 범위를 대조할 때만. 병명을 먼저 묻지 않는다.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "disease": {"type": "string", "description": "사용자가 말한 병명이나 질병코드(예: 우울증, F32)"},
-            },
-            "required": ["disease"],
-        },
-    },
-}
-KCD_WARNING = ("질병코드는 병명으로 찾은 후보이며 실제 진단서의 코드와 다를 수 있습니다. "
-               "보상 여부는 약관 조항과 보험사 심사로 확정됩니다")
-KCD_KIND_LABELS = {"excluded": "면책", "exception": "면책 예외(보상 가능성 있음)"}
-
-
-def _kcd_available(ctx):
-    return (bool((ctx.rule_set or {}).get("code_ranges")) and _exclusions_available(ctx)
-            and kcd_index.available())
-
-
-def _kind_summary(items):
-    kinds = {i["kind_summary"] for i in items}
-    if not kinds:
-        return None
-    if kinds == {"exception"}:
-        return "exception"
-    if kinds == {"excluded"}:
-        return "excluded"
-    return "excluded_with_exception"
-
-
-def run_kcd(args, ctx):
-    """design.md 9.9: 로컬 색인으로 후보 코드를 찾고 면책 코드 범위와 대조한 뒤, 같은 실행 안에서
-    check_exclusions를 돌린다(D8). 병명은 외부로 보내지 않고, 결과는 메모에 넣지 않는다(Req 11.4)."""
-    disease = args.get("disease")
-    if not isinstance(disease, str) or not disease.strip():
-        raise ValueError("disease가 비어 있습니다.")
-    disease = disease.strip()
-    try:
-        candidates = kcd_index.lookup(disease)
-    except sqlite3.Error:
-        candidates = []
-    items = kcd.match([{"code": c["code"], "name": c["name_ko"]} for c in candidates],
-                      (ctx.rule_set or {}).get("code_ranges") or [])
-    for item in items:
-        for m in item["matches"]:
-            m["label"] = KCD_KIND_LABELS.get(m["kind"], m["kind"])
-            if m.get("quote"):
-                ctx.add_evidence([{"section": m.get("section") or "", "article_no": m.get("article_no") or "",
-                                   "title": m.get("title") or "", "text": m["quote"],
-                                   "highlights": [m["quote"]]}])
-    ctx.turn["tools"].append("check_exclusions")
-    try:
-        exclusions_check = run_exclusions({"question": f"{disease} 치료 보상 여부"}, ctx)
-    except CAUGHT_ERRORS as e:
-        exclusions_check = {"error": str(e)}
-    return {
-        "found": bool(candidates),
-        "candidates": candidates,
-        "matches": items,
-        "kind_summary": _kind_summary(items),
-        "exclusions_check": exclusions_check,
-        "warning": KCD_WARNING,
-        "source_note": kcd_index.source_note(),
-    }
-
-
 # ---- request_consultation -----------------------------------------------------------------------
 # 회신 이메일이 새지 않도록 이 어댑터는 print·logging을 쓰지 않는다(Req 11.6, 14.6).
 CONSULT_NOTIFY = True            # 평가(run_chat)는 False로 끈다
@@ -845,10 +710,6 @@ REGISTRY = [
          available=_claim_available, run=run_claim, disclaimer=True),
     Tool(name="explain_term", schema=TERM_TOOL, rules=TERM_RULES,
          available=_term_available, run=run_term, disclaimer=False),
-    Tool(name="classify_hospital", schema=HOSPITAL_TOOL, rules=HOSPITAL_RULES,
-         available=_hospital_available, run=run_hospital, disclaimer=False),
-    Tool(name="lookup_kcd", schema=KCD_TOOL, rules=KCD_RULES,
-         available=_kcd_available, run=run_kcd, disclaimer=True),
     Tool(name="request_consultation", schema=CONSULT_TOOL, rules=CONSULT_RULES,
          available=lambda ctx: True, run=run_consultation, disclaimer=False),
 ]
