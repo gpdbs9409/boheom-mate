@@ -42,7 +42,7 @@ from pathlib import Path
 EVAL_DIR = Path(__file__).parent
 sys.path.insert(0, str(EVAL_DIR.parent))
 
-from boheom_mate.ui import chat  # noqa: E402
+from boheom_mate.ui import chat, tools  # noqa: E402
 from boheom_mate.core import memory as session_memory  # noqa: E402
 
 JARGON = re.compile(r"비급여|(?<!비)급여|본인부담금|공제|통원|산정특례|상급병실료|요양급여")
@@ -172,7 +172,8 @@ def turn_source(scenario, turn):
 def prompt_chars(source):
     """상품별 시스템 프롬프트 길이(메모 제외). 만들 수 없으면 None."""
     try:
-        return len(chat._system_prompt(source, chat.calculator_available(source)))
+        ctx = tools.make_ctx(source)
+        return len(chat._system_prompt(ctx, tools.bound_tools(ctx)))
     except Exception:
         return None
 

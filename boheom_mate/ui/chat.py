@@ -12,10 +12,11 @@ import json
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from boheom_mate.core import calculator
 from boheom_mate.core import memory as session_memory
 from boheom_mate.core import policy_rules
 from boheom_mate.core import rag
+from boheom_mate.ui import tools
+from boheom_mate.ui.tools import CALCULATE_SIMPLE_TOOL, CALCULATE_TOOL, SEARCH_TOOL  # noqa: F401 (기존 이름 유지)
 
 CALCULATOR_SOURCE = "KB_실손의료비보장보험_26.09_약관.pdf"  # 기본 상품(첫 화면, 평가에서 쓰는 약관)
 MAX_TOOL_ROUNDS = 4
@@ -24,36 +25,15 @@ HISTORY_TURNS = 12  # GPT에 보내는 최근 메시지 수
 # 답변 말투. False면 쉬운 말 규칙을 빼고 답한다(평가에서 전후 비교용)
 PLAIN_LANGUAGE = True
 
-BASE_PROMPT = """당신은 '보험메이트', 실손의료보험 약관 상담 도우미입니다. 사용자와 이어지는 대화를 합니다.
-
-[약관 내용]
-- 보장 여부, 조건, 한도, 빼는 돈(공제) 같은 약관 내용은 반드시 search_terms 도구 결과로만 말하세요.
-  이번 대화에서 이미 찾은 결과는 다시 써도 됩니다. 직접 지어내지 마세요.
-- search_terms에는 앞 대화를 반영해 혼자 읽어도 뜻이 통하는 완전한 질문을 넣으세요.
-  예: 앞에서 감기 통원 이야기를 했고 "대학병원이면요?"라고 물으면 → "감기로 대학병원에 통원했을 때 보상 내용과 공제금액"
-- 도구 결과가 found=false면 "약관에서 확인할 수 없다"고 말하세요.
-{product_note}
-[금액 계산]
-- "얼마 받아요?" 같은 금액 질문은 calculate_payout 도구로만 계산하세요. 직접 계산하지 마세요.
-- 계산에 꼭 필요한 정보: 통원/입원, 병원 종류(동네 의원·병원 / 종합병원·대학병원), 낸 금액.
-  빠진 것이 있으면 도구를 부르지 말고 한 번에 짧게 물어보세요.
-- 가입 세대를 모르면 한 번 물어보세요(가입 시기: 2009.10 이전=1세대, ~2017.3=2세대, ~2021.6=3세대, 2021.7 이후=4세대).
-  모르거나 안 알려 주면 generation은 비워 두고 최신 기준으로 계산하되, 세대에 따라 실제가 다를 수 있다고 안내하세요.
-  1~3세대라고 하면 generation에 그 값을 넣으세요. 지금은 최신 기준 '참고 상한'만 제공되며 실제와 차이가 큽니다.
-- 통원 금액이 여러 번 방문의 합계면 방문 횟수(visits)를 물어 함께 넣으세요. 공제는 방문 1건당 뗍니다.
-- 실손을 2개 이상 가입했다고 하면 has_other_insurance=true로 넣으세요(비례보상 안내).
-- 사용자가 가입 시기(연도·월)를 말했으면 joined_year, joined_month에 넣고 generation은 직접 정하지 마세요.
-  세대는 코드가 가입 시기로 정합니다. [이 대화에서 기억하는 정보]에 가입 세대가 있으면 그 값을 generation에 넣으세요.
-- 낸 금액은 영수증의 '급여 본인부담금'과 '비급여' 칸에 있다고 알려 주세요.
-  사용자가 "도수치료 10만 원"처럼 대략 말하면 그 금액으로 계산하세요(도수치료·주사·MRI는 해당 칸에).
-- 암, 뇌혈관·심장 질환, 희귀·난치 질환 같은 중증 질환 치료라고 말하지 않았으면 severe=false로 계산하세요.
-- 사용자가 조건만 바꿔 다시 물으면(예: "대학병원이었으면요?") 앞의 값을 그대로 쓰고 바뀐 것만 고쳐 다시 계산하세요.
-- 계산 결과의 항목별 표는 화면에 따로 보여 주므로, 답변에는 총액과 핵심 이유만 쓰세요.
-{calculator_note}
-[범위]
+HEADER = "당신은 '보험메이트', 실손의료보험 약관 상담 도우미입니다. 사용자와 이어지는 대화를 합니다.\n\n"
+SCOPE = """[범위]
 - 실손보험과 관계없는 질문에는 이 앱이 답할 수 있는 범위를 짧게 안내하세요.
 """
-
+# 도구 규칙 문단은 ui/tools.py의 Tool.rules에 있고, _system_prompt가 bound된 도구의 것만 넣는다
+# 계산기가 꺼진 상품(calculate_payout이 bound되지 않음)에는 [금액 계산] 규칙 대신 이 안내를 넣는다
+CALCULATOR_OFF_NOTE = ("[금액 계산]\n"
+                       "- 이 상품은 약관에서 계산에 필요한 값을 확인하지 못해 계산기를 쓸 수 없습니다. "
+                       "금액 질문에는 약관 내용만 안내하세요.\n")
 PLAIN_RULES = """
 [말투]
 - 보험을 전혀 모르는 사람도 바로 알아듣게 쉬운 말로, 짧게 답하세요.
@@ -64,89 +44,6 @@ PLAIN_RULES = """
 - 금액은 굵게 쓰세요. 조항 원문은 화면에 따로 보이므로 길게 인용하지 마세요.
 - 도움이 되면 마지막에 다음에 할 수 있는 것을 한 줄로 제안하세요. 예: "영수증 금액을 알려 주시면 받을 금액을 계산해 드릴게요."
 """
-
-SEARCH_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "search_terms",
-        "description": "가입한 실손보험 약관에서 관련 조항을 찾아 근거와 함께 답을 받는다.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "question": {"type": "string", "description": "앞 대화를 반영한, 혼자 읽어도 뜻이 통하는 완전한 질문"},
-            },
-            "required": ["question"],
-        },
-    },
-}
-
-CALCULATE_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "calculate_payout",
-        "description": "영수증 금액으로 예상 실손 보험금을 계산한다(기본 약관 제3조 공식).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "care": {"type": "string", "enum": ["통원", "입원"]},
-                "hospital": {"type": "string", "enum": ["의원", "종합병원"],
-                             "description": "의원: 동네 의원·병원·치과·한의원·요양병원·약국 / 종합병원: 종합병원·대학병원(상급종합병원)"},
-                "covered_copay": {"type": "integer", "description": "급여 본인부담금(원). 없으면 0"},
-                "nhis_paid": {"type": "integer", "description": "공단부담금(원). 사용자가 말했을 때만 넣는다"},
-                "non_covered": {"type": "integer", "description": "비급여(원) 중 도수치료·주사·MRI·병실료를 뺀 나머지. 없으면 0"},
-                "manual_therapy": {"type": "integer", "description": "비급여 도수치료·체외충격파(원)"},
-                "injection": {"type": "integer", "description": "비급여 주사(원)"},
-                "mri": {"type": "integer", "description": "비급여 MRI(원)"},
-                "severe": {"type": "boolean", "description": "암 등 중증(산정특례 대상) 질환 치료인지"},
-                "room_fee": {"type": "integer", "description": "입원 시 1·2인실 추가 비용(원)"},
-                "room_days": {"type": "integer", "description": "입원 일수(1·2인실 비용이 있을 때)"},
-                "visits": {"type": "integer", "description": "통원 방문 횟수. 금액이 여러 번 방문의 합계면 그 횟수. 모르면 1"},
-                "generation": {"type": "string", "enum": ["1세대", "2세대", "3세대", "4세대"],
-                               "description": "가입 세대. 1세대: 2009년 9월까지, 2세대: 2009년 10월~2017년 3월, 3세대: 2017년 4월~2021년 6월, 4세대: 2021년 7월부터"},
-                "has_other_insurance": {"type": "boolean", "description": "실손보험을 2개 이상 가입했는지"},
-                "joined_year": {"type": "integer", "description": "사용자가 말한 실손 가입 연도. 말했으면 generation 대신 이 값을 넣는다"},
-                "joined_month": {"type": "integer", "description": "사용자가 말한 실손 가입 월(1~12). 모르면 넣지 않는다"},
-            },
-            "required": ["care", "hospital"],
-        },
-    },
-}
-
-
-CALCULATE_SIMPLE_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "calculate_payout",
-        "description": "영수증 금액으로 예상 실손 보험금을 계산한다(간편가입 약관 제3조 공식).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "care": {"type": "string", "enum": ["통원", "입원"]},
-                "covered_copay": {"type": "integer", "description": "급여 본인부담금(원). 없으면 0"},
-                "non_covered": {"type": "integer",
-                                "description": "비급여(원) 중 도수치료·주사·MRI·병실료를 뺀 나머지. 약값(처방조제비)은 넣지 않는다"},
-                "manual_therapy": {"type": "integer", "description": "비급여 도수치료·체외충격파·증식치료(원)"},
-                "injection": {"type": "integer",
-                              "description": "비급여 주사(원). 항암제·항생제·희귀의약품 주사는 non_covered에 넣는다"},
-                "mri": {"type": "integer", "description": "비급여 MRI/MRA(원)"},
-                "room_fee": {"type": "integer"},
-                "room_days": {"type": "integer"},
-                "visits": {"type": "integer", "description": "통원 방문 횟수. 모르면 1"},
-                "prior_deductible": {"type": "integer",
-                                     "description": "올해(계약해당일부터 1년) 이미 낸 입원 공제액. 사용자가 말했을 때만"},
-                "nhis_applied": {"type": "boolean",
-                                 "description": "국민건강보험을 적용받았는지. 적용받지 못했다고 말했을 때만 false"},
-                "hospital": {"type": "string", "enum": ["의원", "종합병원"],
-                             "description": "이 상품은 공제에 쓰지 않는다. 말했으면 넣는다"},
-                "generation": {"type": "string", "enum": ["1세대", "2세대", "3세대", "4세대"]},
-                "has_other_insurance": {"type": "boolean"},
-                "joined_year": {"type": "integer"},
-                "joined_month": {"type": "integer"},
-            },
-            "required": ["care"],
-        },
-    },
-}
 
 # 상품 구조 안내([약관 내용] 끝). 프로필을 모르면 넣지 않는다
 PRODUCT_NOTES = {
@@ -188,19 +85,32 @@ def calculator_available(source):
 
 
 def _calculate_tool(profile):
-    return CALCULATE_SIMPLE_TOOL if profile == policy_rules.PROFILE_SIMPLE else CALCULATE_TOOL
+    return tools.calculate_schema(profile)
 
 
-def _system_prompt(source, can_calculate, profile=None):
-    if profile is None:
-        profile = _profile(source)
-    if can_calculate:
-        note = ""
-    else:
-        note = ("- 이 상품은 약관에서 계산에 필요한 값을 확인하지 못해 계산기를 쓸 수 없습니다. "
-                "금액 질문에는 약관 내용만 안내하세요.\n")
-    return (BASE_PROMPT.format(calculator_note=note, product_note=product_note(profile))
-            + (PLAIN_RULES if PLAIN_LANGUAGE else ""))
+def bound_tool_names(source):
+    """이 상품에서 이번 턴에 쓸 수 있는 도구 이름(REGISTRY 순서)."""
+    return [t.name for t in tools.bound_tools(tools.make_ctx(source))]
+
+
+def _system_prompt(ctx, bound):
+    """HEADER + bound 도구 규칙 + product_note + SCOPE + PLAIN_RULES + 메모.
+    product_note는 [약관 내용](search_terms 규칙) 끝에 붙는다. 도구 규칙 문단 사이는 빈 줄 하나.
+    기본형에서 search_terms·calculate_payout 두 개가 bound면 이전 BASE_PROMPT와 같은 글이 된다."""
+    note = product_note((ctx.rule_set or {}).get("profile"))
+    names = [t.name for t in bound]
+    parts = [HEADER]
+    for t in bound:
+        parts.append(t.rules + (note if t.name == "search_terms" else "") + "\n")
+    if "search_terms" not in names and note:
+        parts.append(note + "\n")
+    if "calculate_payout" not in names:
+        parts.append(CALCULATOR_OFF_NOTE + "\n")
+    parts.append(SCOPE)
+    if PLAIN_LANGUAGE:
+        parts.append(PLAIN_RULES)
+    parts.append(session_memory.prompt_block(ctx.memory))
+    return "".join(parts)
 
 
 def _model_history(history):
@@ -215,80 +125,30 @@ def _model_history(history):
     return messages
 
 
-def _run_search(args, source, turn):
-    result = rag.answer(args["question"], source)
-    turn["searches"].append(args["question"])
-    turn["summary"] = turn["summary"] or result["summary"]
-    for e in result["evidence"]:
-        if e not in turn["evidence"]:
-            turn["evidence"].append(e)
-    return {
-        "found": result["found"],
-        "answer": result["answer"],
-        "evidence": [f'{e["section"]} {e["article_no"]} {e["title"]}' for e in result["evidence"]],
-    }
-
-
-def _run_calculate(args, source, turn):
-    """계산 값은 이 상품 약관에서 뽑아 검증한 것을 쓰고, 계산에 쓴 약관 구절을 근거로 붙인다."""
-    rules = policy_rules.load(source)
-    if rules is None:
-        raise ValueError("이 상품은 계산에 필요한 약관 값을 확인하지 못해 계산할 수 없습니다.")
-    inputs = {k: v for k, v in args.items() if v is not None}
-    # 가입 시기를 말했으면 세대는 GPT가 아니라 코드가 정한다(경계 연도에 월을 모르면 세대를 비워 둔다)
-    year, month = inputs.pop("joined_year", None), inputs.pop("joined_month", None)
-    if year is not None:
-        generation = session_memory.generation_of(year, month)
-        if generation:
-            inputs["generation"] = generation
-        else:
-            inputs.pop("generation", None)
-    if rules.get("profile") == policy_rules.PROFILE_SIMPLE:
-        result = calculator.calculate_simple(**inputs, rules=rules["values"], articles=rules["articles"],
-                                             exclusion_quotes=rules.get("exclusion_items") or {})
-    else:
-        result = calculator.calculate(**inputs, rules=rules["values"], articles=rules["articles"])
-    turn["calculation"] = {**result, "inputs": inputs}
-    for e in policy_rules.evidence(rules, result["rules_used"]):
-        if e not in turn["evidence"]:
-            turn["evidence"].append(e)
-    return {k: v for k, v in result.items() if k != "rules_used"}
-
-
 def reply(history, source, memory=None):
     """history: [{"role": "user"|"assistant", "content": str, "calculation": dict|None}, ...] (마지막이 사용자 질문)
     memory: 이 대화의 상담 메모(core.memory). 프롬프트에 넣어 이미 말한 정보를 다시 묻지 않게 한다
-
     반환값: {"content": 답변, "evidence": [조항], "calculation": 계산 결과|None,
-             "summary": 질문 요지|None, "searches": [GPT가 검색한 질문]}
+             "summary": 질문 요지|None, "searches": [GPT가 검색한 질문],
+             "tools": [이번 턴에 실행한 도구 이름(호출 순서)], "memory_updates": {도구가 남긴 메모 갱신}}
+    도구 실행은 ui/tools.py의 레지스트리·디스패처가 맡는다.
     """
-    rules = _load_rules(source)
-    can_calculate = rules is not None
-    profile = _profile(source, rules)
-    tools = [SEARCH_TOOL] + ([_calculate_tool(profile)] if can_calculate else [])
-    llm = rag._llm.bind_tools(tools)
-    system = _system_prompt(source, can_calculate, profile) + session_memory.prompt_block(memory)
-    messages = [SystemMessage(content=system)] + _model_history(history)
-    turn = {"evidence": [], "calculation": None, "summary": None, "searches": []}
+    ctx = tools.make_ctx(source, memory, history)
+    bound = tools.bound_tools(ctx)
+    llm = rag._llm.bind_tools(tools.schemas(bound, ctx))
+    messages = [SystemMessage(content=_system_prompt(ctx, bound))] + _model_history(history)
+
+    def _result(content):
+        keys = ("evidence", "calculation", "summary", "searches", "tools", "memory_updates")
+        return {"content": content, **{k: ctx.turn[k] for k in keys}}
 
     for _ in range(MAX_TOOL_ROUNDS):
         message = llm.invoke(messages)
         if not message.tool_calls:
             content = message.content if isinstance(message.content, str) else message.text
-            return {"content": content or "", **turn}
-
+            return _result(content or "")
         messages.append(message)
         for call in message.tool_calls:
-            try:
-                args = call["args"] or {}
-                if call["name"] == "search_terms":
-                    output = _run_search(args, source, turn)
-                elif call["name"] == "calculate_payout":
-                    output = _run_calculate(args, source, turn)
-                else:
-                    output = {"error": f"없는 도구: {call['name']}"}
-            except (ValueError, TypeError) as e:  # 잘못된 값이면 GPT가 고쳐서 다시 부르거나 사용자에게 묻게 한다
-                output = {"error": str(e)}
+            output = tools.dispatch(call["name"], call["args"], bound, ctx)
             messages.append(ToolMessage(content=json.dumps(output, ensure_ascii=False), tool_call_id=call["id"]))
-
-    return {"content": "죄송해요, 답을 정리하지 못했어요. 질문을 조금 바꿔서 다시 물어봐 주세요.", **turn}
+    return _result("죄송해요, 답을 정리하지 못했어요. 질문을 조금 바꿔서 다시 물어봐 주세요.")
