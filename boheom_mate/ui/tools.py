@@ -219,6 +219,12 @@ def run_calculate(args, ctx):
         else:
             inputs.pop("generation", None)
     if rules.get("profile") == policy_rules.PROFILE_SIMPLE:
+        # 사용자가 이번에 말하지 않았으면 메모의 올해 누적 공제액·통원 횟수를 쓴다(작업 11.6)
+        memo = session_memory.clean(ctx.memory)
+        if "prior_deductible" not in inputs and memo["deductible_this_year"] is not None:
+            inputs["prior_deductible"] = memo["deductible_this_year"]
+        if memo["outpatient_visits_this_year"] is not None:
+            inputs.setdefault("prior_visits", memo["outpatient_visits_this_year"])
         result = calculator.calculate_simple(**inputs, rules=rules["values"], articles=rules["articles"],
                                              exclusion_quotes=rules.get("exclusion_items") or {})
     else:
@@ -226,6 +232,44 @@ def run_calculate(args, ctx):
     ctx.turn["calculation"] = {**result, "inputs": inputs}
     ctx.add_evidence(policy_rules.evidence(rules, result["rules_used"]))
     return {k: v for k, v in result.items() if k != "rules_used"}
+
+
+# ---- remaining_limit ----------------------------------------------------------------------------
+
+REMAINING_RULES = """[남은 한도]
+- 올해 이미 받은 보험금·낸 공제액·통원 횟수를 반영해 남은 한도를 물을 때만 remaining_limit을 부르세요.
+  이번 진료의 예상 금액은 calculate_payout, 한도 조건 설명은 search_terms를 쓰세요.
+- 결과에 need가 있으면 그 값(올해 받은 보험금, 올해 낸 입원 공제액)을 한 번 물어보세요.
+- remaining이 null인 항목은 숫자를 지어내지 말고 notes를 전하세요. warning이 있으면 그대로 전하세요.
+"""
+
+REMAINING_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "remaining_limit",
+        "description": "올해 이미 받은 보험금·낸 공제액·방문 횟수를 반영해 남은 한도를 물을 때.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+}
+REMAINING_NEED = ["received_this_year", "deductible_this_year"]
+POLICY_YEAR_WARNING = "올해는 달력 연도가 아니라 계약일부터 1년 단위이므로 기준일에 따라 실제와 다를 수 있음"
+
+
+def run_remaining(args, ctx):
+    """design.md 9.7: 인자 없이 메모의 올해 기수령액·공제액·통원 횟수로 calculator.remaining_limit을 부른다."""
+    rules = ctx.rule_set if (ctx.rule_set or {}).get("ok") else None
+    if rules is None:
+        raise ValueError("이 상품은 약관 한도 값을 확인하지 못해 남은 한도를 계산할 수 없습니다.")
+    memo = session_memory.clean(ctx.memory)
+    received, deductible = memo["received_this_year"], memo["deductible_this_year"]
+    warning = None if memo["anniversary_month"] else POLICY_YEAR_WARNING
+    if received is None and deductible is None:
+        return {"items": [], "notes": [], "need": list(REMAINING_NEED), "warning": warning}
+    result = calculator.remaining_limit(rules["profile"], rules["values"], received=received,
+                                        prior_deductible=deductible,
+                                        prior_visits=memo["outpatient_visits_this_year"])
+    ctx.add_evidence(policy_rules.evidence(rules, result["rules_used"]))
+    return {"items": result["items"], "notes": result["notes"], "need": None, "warning": warning}
 
 
 # ---- check_exclusions ---------------------------------------------------------------------------
@@ -657,6 +701,8 @@ REGISTRY = [
     Tool(name="calculate_payout", schema=CALCULATE_TOOL, rules=CALCULATE_RULES,
          available=lambda ctx: bool((ctx.rule_set or {}).get("ok")), run=run_calculate, disclaimer=True,
          schema_for=lambda ctx: calculate_schema((ctx.rule_set or {}).get("profile"))),
+    Tool(name="remaining_limit", schema=REMAINING_TOOL, rules=REMAINING_RULES,
+         available=lambda ctx: bool((ctx.rule_set or {}).get("ok")), run=run_remaining, disclaimer=True),
     Tool(name="check_exclusions", schema=EXCLUSIONS_TOOL, rules=EXCLUSIONS_RULES,
          available=_exclusions_available, run=run_exclusions, disclaimer=True),
     Tool(name="identify_generation", schema=GENERATION_TOOL, rules=GENERATION_RULES,

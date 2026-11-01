@@ -237,6 +237,9 @@ def render_questions():
         st.session_state.setdefault("consultations", {})[message_id] = result["consultation"]
     if result["calculation"]:
         memory = session_memory.merge_calculation(memory, result["calculation"].get("inputs"))
+    if result.get("memory_updates"):
+        # 도구가 알아낸 사실(가입 세대·기수령액 등)만 허용 칸으로 합친다
+        memory = session_memory.merge_updates(memory, result["memory_updates"])
     question_store.save_memory(session_id, memory)
     st.rerun()
 

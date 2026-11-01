@@ -444,3 +444,74 @@ def calculate_simple(care, covered_copay=0, non_covered=0, manual_therapy=0, inj
     notes += closing
     return {"total": sum(i["amount"] for i in items), "items": items, "notes": notes,
             "rules_used": sorted(r.used | used_extra)}
+
+
+# remaining_limit의 프로필 이름. policy_rules.PROFILE_BASE·PROFILE_SIMPLE과 같은 값이다
+# (calculator는 다른 모듈을 import하지 않는다)
+_PROFILE_BASE, _PROFILE_SIMPLE = "기본형", "간편가입"
+
+LIMIT_UNVERIFIED = "약관에서 한도를 확인하지 못함"
+LIMIT_NEEDS_ITEM_RECEIVED = "항목별로 받은 금액을 알아야 계산할 수 있음"
+
+# (라벨, 한도 키, 사용량 인자 이름, 단위). design.md 3.2 표
+_SIMPLE_LIMITS = (
+    ("연간 입원 공제 상한까지 남은 공제액", "simple_inpatient_annual_deduct_cap", "prior_deductible", "원"),
+    ("남은 통원 방문 횟수", "simple_outpatient_annual_visits", "prior_visits", "회"),
+    ("같은 상해·질병의 남은 가입금액(참고)", "simple_inpatient_case_cap", "received", "원"),
+)
+_BASE_LIMITS = (
+    ("비중증 비급여 통원 남은 일수", "non_severe_outpatient_annual_days", "prior_visits", "일"),
+)
+# 기본형 3대 비급여 연간 한도. 메모에 항목별 기수령액이 없어 남은 금액은 계산하지 않는다
+_BASE_ITEM_CAPS = (
+    ("도수치료·체외충격파 연간 한도(중증)", "severe_manual_therapy_annual_cap"),
+    ("비급여 주사 연간 한도(중증)", "severe_injection_annual_cap"),
+    ("MRI 연간 한도(중증)", "severe_mri_annual_cap"),
+    ("MRI 연간 한도(비중증)", "non_severe_mri_annual_cap"),
+)
+
+
+def remaining_limit(profile, rules, received=None, prior_deductible=None, prior_visits=None):
+    """올해(Policy_Year) 남은 한도를 계산한다.
+
+    profile: "기본형" 또는 "간편가입"
+    rules: 검증된 약관 값 {키: 숫자}. 없는 키(또는 None)는 미검증 한도로 보고 limit·remaining을 None으로 둔다
+    received: 올해 받은 보험금 합계(원), prior_deductible: 올해 낸 입원 공제액(원),
+    prior_visits: 올해 통원 방문 횟수. 모두 None(모름) 또는 0 이상 정수. None이면 그 항목의 remaining은 None
+
+    반환값: {"items": [{"label", "limit", "used", "remaining", "unit", "key"}], "notes": [...], "rules_used": [...]}
+    remaining = max(0, limit − used)
+    """
+    if profile not in (_PROFILE_BASE, _PROFILE_SIMPLE):
+        raise ValueError(f"profile은 '{_PROFILE_BASE}' 또는 '{_PROFILE_SIMPLE}'이어야 합니다.")
+    used_by = {"received": received, "prior_deductible": prior_deductible, "prior_visits": prior_visits}
+    for name, value in used_by.items():
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+            raise ValueError(f"{name}은 None 또는 0 이상의 정수여야 합니다.")
+
+    r = _Rules(rules or {}, {})
+    items, notes = [], []
+
+    def add(label, key, used, unit):
+        limit = r.get(key)
+        if limit is None:
+            remaining = None
+            notes.append(f"{label}: {LIMIT_UNVERIFIED}")
+        else:
+            remaining = None if used is None else max(0, limit - used)
+        items.append({"label": label, "limit": limit, "used": used, "remaining": remaining,
+                      "unit": unit, "key": key})
+
+    if profile == _PROFILE_SIMPLE:
+        for label, key, arg, unit in _SIMPLE_LIMITS:
+            add(label, key, used_by[arg], unit)
+    else:
+        for label, key, arg, unit in _BASE_LIMITS:
+            add(label, key, used_by[arg], unit)
+        for label, key in _BASE_ITEM_CAPS:
+            limit = r.get(key)
+            items.append({"label": label, "limit": limit, "used": None, "remaining": None,
+                          "unit": "원", "key": key})
+            notes.append(f"{label}: {LIMIT_UNVERIFIED if limit is None else LIMIT_NEEDS_ITEM_RECEIVED}")
+
+    return {"items": items, "notes": notes, "rules_used": sorted(r.used)}

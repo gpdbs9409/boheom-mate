@@ -255,7 +255,7 @@ def run(args):
             if sc.get("memory"):
                 if result["calculation"]:
                     memory = session_memory.merge_calculation(memory, result["calculation"].get("inputs"))
-                if result.get("memory_updates") and hasattr(session_memory, "merge_updates"):
+                if result.get("memory_updates"):
                     memory = session_memory.merge_updates(memory, result["memory_updates"])
 
             fails = check(expect, result)

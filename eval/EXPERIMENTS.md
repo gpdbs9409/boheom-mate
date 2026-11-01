@@ -404,3 +404,27 @@
 - C09·C10 `check_exclusions`, C11 `identify_generation`, C12 ①·② `claim_guide`(② "2029" 포함), C13 `explain_term` 모두 통과.
 - 프롬프트 길이: E16보다 +170자(기본형 3,559자, 간편가입 3,505자).
 - 판정: 합격선(거절 100%, 검색 94% 이상, 기존 11/11, 기존 도구 선택 오류 0)을 모두 지켜 채택한다. 테스트 26개 파일 통과.
+
+## E17 세션 메모리 칸 확장과 remaining_limit (채택)
+- 결과: `results/20261101_184241_dev_full.json`(답변 포함), `results/chat_20261101_184119.json`(채팅)
+- 가설: 세션 메모리에 올해 기수령액·누적 공제액·통원 횟수·계약해당일 칸을 더하고 `remaining_limit` 도구를 붙여도 E16b 합격선이 그대로이고, C14에서 `remaining_limit`을 불러 남은 공제 한도(200만 − 150만 = 50만 원)를 답한다.
+- 바꾼 것(단계 5): `core/memory.py`(새 칸 5개, `merge_updates`), `core/calculator.py`(`remaining_limit`), `ui/tools.py`(`remaining_limit` 도구와 규칙, 간편가입 `calculate_payout`이 메모의 누적 공제액·통원 횟수를 기본값으로 사용), `app.py`·`eval/run_chat.py`(`memory_updates` 반영), `conversations.json`에 C14(`group: "tools"`, 간편가입, `memory: true`).
+- 결과(dev 20문항 × 3회)
+
+| 지표 | E16b | E17 |
+|---|---|---|
+| 검색 적중 | 94% | 94% |
+| 상위 3 적중 | 82% | 82% |
+| MRR | 0.66 | 0.62 |
+| 거절 정확 | 100% | 100% |
+| 답변 키워드 | 100% | 100% |
+| 근거 일치율 | 35% | 40% |
+| 기존 11턴 통과 | 11/11 | 11/11 |
+| 도구 선택 오류(전체/기존) | 0/0 | 0/0 |
+| 전체 채팅 턴 통과 | 25/25 | 26/26 (답변당 어려운 용어 0.88개, 평균 4.0초) |
+
+- C14 통과: `remaining_limit`만 불렀고 답변에 "50만 원"(상한 200만 원, 기수령 150만 원)과 계약일 기준 1년 경고가 있다.
+- tools 그룹: C09·C10 `check_exclusions`, C11 `identify_generation`, C12 ①·② `claim_guide`, C13 `explain_term`, C20~C22 모두 통과(E16b와 같음). C22는 `search_terms`만 불렀다.
+- 프롬프트 길이: E16b보다 +267자(기본형 3,826자, 간편가입 3,772자).
+- 평가 뒤 `state/outbox/` 파일 0개.
+- 판정: 합격선(거절 100%, 검색 94% 이상, 기존 11/11, 기존 도구 선택 오류 0)을 모두 지켜 채택한다. MRR 0.04 하락은 검색 코드 변경이 없어 답변 생성 회차 차이로 본다. 테스트 27개 파일 통과.
