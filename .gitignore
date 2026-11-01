@@ -6,3 +6,16 @@ __pycache__/
 questions.db
 data/*.pdf
 state/
+
+# 로컬 전용(원격 저장소에 올리지 않음): AI 에이전트 작업 문서, 테스트
+common.md
+CLAUDE.md
+AGENTS.md
+.kiro/
+.claude/
+.codex/
+.superpowers/
+docs/superpowers/
+docs/archive/
+.vscode/
+tests/

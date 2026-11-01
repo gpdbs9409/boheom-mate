@@ -1,6 +1,6 @@
 """MCP 클라이언트: 외부 MCP 서버(Slack)의 도구를 코드가 대신 호출한다.
 
-켜는 법: .env에 토큰과 보낼 곳만 넣으면 된다(.env.example 참고). 넣은 서버만 켜지고, 없으면 기능이 숨는다.
+켜는 법: .env에 SLACK_MCP_USER_TOKEN, SLACK_HANDOFF_CHANNEL_ID를 넣으면 된다. 넣은 서버만 켜지고, 없으면 기능이 숨는다.
 넣은 뒤 확인(아무것도 보내지 않음): .venv/bin/python -m boheom_mate.integrations.mcp_client --check
 
 안전 규칙(로그인 없는 방문자가 쓰는 앱이라 운영자 계정 권한을 함부로 쓰지 않게 한다):

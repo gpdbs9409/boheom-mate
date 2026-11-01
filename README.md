@@ -169,7 +169,7 @@ LangChain 기본 설정(글자 수 청킹 + 벡터 검색만)은 같은 평가�
 - 키를 넣은 뒤 `.venv/bin/python -m boheom_mate.integrations.mcp_client --check`로 연결과 보내기 도구를 확인할 수 있습니다(아무것도 보내지 않음).
 - 도구 이름·입력 칸 이름이 조금 달라도 정해 둔 후보(메시지 보내기 도구만)에서 찾아 맞춥니다.
 - 테스트는 가짜 MCP 서버(stdio)로 합니다. 허용 목록 밖 도구 거절, 채널 고정,
-  토큰이 오류 메시지에 나오지 않는지를 확인합니다(`tests/test_mcp_client.py`).
+  토큰이 오류 메시지에 나오지 않는지를 확인합니다.
 
 **MCP 서버: 보험메이트 도구를 다른 에이전트에 내보내기** (`boheom_mate/mcp_server.py`)
 
@@ -179,8 +179,7 @@ LangChain 기본 설정(글자 수 청킹 + 벡터 검색만)은 같은 평가�
 | `search_terms` | 약관 검색 → 근거 조항·핵심 문장과 함께 답변 (근거 없으면 found=false) |
 | `calculate_payout` | 약관에서 검증한 기준으로 예상 보험금 계산 |
 
-읽기 전용이라 저장·전송·삭제를 하지 않습니다. Kiro에서는 `.kiro/settings/mcp.json`에 등록되어 있어 바로 쓸 수 있고,
-다른 클라이언트에서는 `.venv/bin/python -m boheom_mate.mcp_server`(stdio)를 등록하면 됩니다.
+읽기 전용이라 저장·전송·삭제를 하지 않습니다. Kiro, Claude Desktop 같은 MCP 클라이언트에 `.venv/bin/python -m boheom_mate.mcp_server`(stdio)를 등록하면 됩니다.
 
 ## 실행 방법
 
@@ -189,7 +188,7 @@ Python 3.11 이상이 필요합니다.
 ```bash
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-cp .env.example .env          # .env에 OPENAI_API_KEY 입력
+echo 'OPENAI_API_KEY=sk-...' > .env   # OpenAI 키 입력
 ```
 
 약관 PDF는 저장소에 포함하지 않습니다. [KB손해보험 공시실](https://www.kbinsure.co.kr/CG802030001.ec)에서
@@ -202,7 +201,6 @@ cp .env.example .env          # .env에 OPENAI_API_KEY 입력
 .venv/bin/python eval/run_eval.py                                  # 답변까지 포함한 평가 (20문항 × 3회)
 .venv/bin/python eval/run_paraphrase.py --note "메모"              # 표현만 다른 질문의 근거 일치
 .venv/bin/python eval/run_chat.py --note "메모"                    # 이어지는 상담·계산·쉬운 말
-.venv/bin/python tests/test_calculator.py                          # 테스트 (tests/test_*.py 각각 실행)
 .venv/bin/python -m boheom_mate.mcp_server                         # 보험메이트 MCP 서버 (stdio)
 ```
 
@@ -245,7 +243,6 @@ boheom_mate/
     ├── apply_approved.py  승인된 약관 반영
     └── split_check.py     조항 분할 점검
 eval/                      평가셋, 평가 스크립트, 실험 기록과 결과
-tests/                     테스트 14개 (계산기, 계산 기준 검증, 메모리, 근거 강조, MCP 클라이언트·서버, 조항 분할, 주간 확인 등)
 deploy/                    systemd, nginx, 배포 스크립트
 ```
 
