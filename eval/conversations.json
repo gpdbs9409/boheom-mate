@@ -26,6 +26,29 @@
   {"id": "C08", "name": "MRI 통원", "turns": [
     {"user": "허리 아파서 종합병원에서 MRI 찍었는데 60만 원 나왔어요. 얼마 돌려받나요?", "expect": {"calc": 300000}}
   ]},
+  {"id": "C09", "group": "tools", "name": "면책 확인: 임신 관련 진료",
+   "turns": [
+    {"user": "임신 관련 진료도 실손 돼요?", "expect": {"tool": "check_exclusions", "evidence_title": "보상하지 않는 사항", "no_tool": ["calculate_payout"]}}
+  ]},
+  {"id": "C10", "group": "tools", "name": "면책 확인: 치과 임플란트",
+   "turns": [
+    {"user": "치과 임플란트 보상돼요?", "expect": {"tool": "check_exclusions", "evidence_title": "보상하지 않는 사항", "no_tool": ["calculate_payout"]}}
+  ]},
+  {"id": "C11", "group": "tools", "name": "가입 시기로 세대 판별 (기대 2세대)",
+   "note": "2015년 5월 가입은 2009.10~2017.3 표준화 실손(2세대)",
+   "turns": [
+    {"user": "2015년 5월에 실손 가입했어요. 몇 세대예요?", "expect": {"tool": "identify_generation", "answer_includes": ["2세대"], "no_tool": ["calculate_payout"]}}
+  ]},
+  {"id": "C12", "group": "tools", "name": "청구 안내: 서류 → 청구 기한",
+   "note": "② 치료일 2026-03-02 + 약관 청구 기한 3년 → 2029년",
+   "turns": [
+    {"user": "보험금 청구하려면 어떤 서류를 내야 해요?", "expect": {"tool": "claim_guide", "answer_includes": ["영수증"]}},
+    {"user": "2026년 3월 2일에 치료받았으면 언제까지 청구해야 해요?", "expect": {"tool": "claim_guide", "answer_includes": ["2029"]}}
+  ]},
+  {"id": "C13", "group": "tools", "name": "용어 설명: 비급여",
+   "turns": [
+    {"user": "비급여가 무슨 뜻이에요?", "expect": {"tool": "explain_term", "evidence_title": "용어의 정의"}}
+  ]},
   {"id": "C17", "group": "tools", "source": "KB_간편가입실손의료비보장보험_26.09_약관.pdf",
    "name": "간편가입 통원 (기대 40,000원)",
    "note": "보장대상의료비 C=10,000+50,000=60,000. 통원 공제 max(20,000, 60,000×30%=18,000)=20,000. 60,000−20,000=40,000, 통원 회당 한도 20만 원 이하",

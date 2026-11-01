@@ -101,7 +101,10 @@ def _system_prompt(ctx, bound):
     names = [t.name for t in bound]
     parts = [HEADER]
     for t in bound:
-        parts.append(t.rules + (note if t.name == "search_terms" else "") + "\n")
+        rules = t.rules
+        if t.name == "calculate_payout" and "identify_generation" in names:
+            rules = rules.replace(tools.CALCULATE_GENERATION_LINE, tools.GENERATION_HINT, 1)
+        parts.append(rules + (note if t.name == "search_terms" else "") + "\n")
     if "search_terms" not in names and note:
         parts.append(note + "\n")
     if "calculate_payout" not in names:

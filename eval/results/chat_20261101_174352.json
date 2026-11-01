@@ -1,0 +1,554 @@
+{
+  "note": "E16 local tools",
+  "config": {
+    "model": "gpt-5.4-mini",
+    "plain_language": true
+  },
+  "summary": {
+    "turn_pass": "24/25",
+    "turn_pass_rate": 0.96,
+    "legacy_turn_pass": "11/11",
+    "tool_selection_errors": 2,
+    "legacy_tool_selection_errors": 2,
+    "jargon_per_reply": 1.48,
+    "avg_seconds": 3.4,
+    "mode": {
+      "hira_key": false,
+      "kcd_index": false
+    },
+    "prompt_chars": {
+      "KB_실손의료비보장보험_26.09_약관.pdf": 3389,
+      "KB_간편가입실손의료비보장보험_26.09_약관.pdf": 3335
+    }
+  },
+  "rows": [
+    {
+      "id": "C01",
+      "group": null,
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "감기 때문에 동네 병원 갔는데 실손 돼요?",
+      "reply": "네, **보상될 수 있어요.**\n\n감기처럼 질병으로 **동네 의원·병원에 외래 진료**를 받으면 실손의 **통원 보장 대상**에 들어갈 수 있습니다.  \n다만 **전액본인부담 급여 진료비는 제외**되고, **비급여 진료비는 가입한 특약과 해당 진료의 급여/비급여 여부**에 따라 달라집니다.\n\n영수증 금액을 알려 주시면 **얼마 받는지** 계산해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": true,
+      "tools": [
+        "check_exclusions"
+      ],
+      "jargon": 5,
+      "searches": [
+        "감기 때문에 동네 의원·병원에 통원(외래 진료)한 경우 실손보험 보상 여부와 조건"
+      ],
+      "calculation": null
+    },
+    {
+      "id": "C01",
+      "group": null,
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "15000원 냈어요. 비급여는 없어요",
+      "reply": "예상 보험금은 **5,000원**이에요.\n\n동네 병원 외래로 **15,000원**을 냈고 비급여가 없으면, 계산 결과 **급여 진료비 기준**으로 **5,000원**이 나왔어요.  \n가입 세대에 따라 실제 금액은 달라질 수 있어요.\n\n원하시면 **대학병원/종합병원**이었을 때도 다시 계산해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "calculate_payout",
+        "search_terms"
+      ],
+      "jargon": 2,
+      "searches": [
+        "감기로 동네 의원에 통원 진료를 받고 비급여는 없을 때 실손보험에서 받을 수 있는 금액과 공제금액"
+      ],
+      "calculation": {
+        "inputs": {
+          "care": "통원",
+          "hospital": "의원",
+          "covered_copay": 15000,
+          "non_covered": 0,
+          "visits": 1,
+          "severe": false
+        },
+        "total": 5000
+      }
+    },
+    {
+      "id": "C01",
+      "group": null,
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "그럼 대학병원이었으면요?",
+      "reply": "대학병원이었으면 **0원**이에요.\n\n종합병원·대학병원 외래는 빼는 돈이 더 커서, **15,000원** 냈다면 계산상 돌려받을 금액이 없어요.  \n가입 세대에 따라 실제 금액은 다를 수 있어요.\n\n원하시면 **공단부담금**까지 반영해서 더 정확히 볼 수 있어요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "calculate_payout"
+      ],
+      "jargon": 0,
+      "searches": [],
+      "calculation": {
+        "inputs": {
+          "care": "통원",
+          "hospital": "종합병원",
+          "covered_copay": 15000,
+          "non_covered": 0,
+          "visits": 1,
+          "severe": false
+        },
+        "total": 0
+      }
+    },
+    {
+      "id": "C02",
+      "group": null,
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "도수치료 10만 원 냈는데 얼마 돌려받아요?",
+      "reply": "예상 보험금은 **50,000원**이에요.\n\n도수치료처럼 건강보험 안 되는 진료비는 최신 기준으로 계산했고, 10만 원에서 빼는 돈을 적용한 결과예요.  \n가입 시기(세대)에 따라 실제 금액은 달라질 수 있어요.\n\n원하시면 가입 시기를 알려 주시면 세대에 맞춰 다시 계산해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "calculate_payout"
+      ],
+      "jargon": 0,
+      "searches": [],
+      "calculation": {
+        "inputs": {
+          "care": "통원",
+          "hospital": "의원",
+          "manual_therapy": 100000,
+          "visits": 1,
+          "severe": false
+        },
+        "total": 50000
+      }
+    },
+    {
+      "id": "C03",
+      "group": null,
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "병원비 얼마 돌려받을 수 있어요?",
+      "reply": "정확한 금액은 **영수증 내용을 알아야** 계산할 수 있어요.\n\n알려주시면 바로 계산해드릴게요:\n- **통원**인지 **입원**인지\n- **병원 종류**: 동네 의원·병원인지, 종합병원·대학병원인지\n- 영수증의 **내가 낸 돈**:  \n  - **급여 본인부담금**  \n  - **비급여**  \n  - 도수치료·주사·MRI가 있으면 그 금액\n\n영수증 숫자를 적어주시면 예상 환급액을 계산해드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [],
+      "jargon": 4,
+      "searches": [],
+      "calculation": null
+    },
+    {
+      "id": "C04",
+      "group": null,
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "맹장 수술로 5일 입원했어요. 보장되나요?",
+      "reply": "네, **일반적인 맹장 수술 입원은 보상 대상**으로 안내됩니다.\n\n다만 확인된 내용은 **질병으로 입원해 치료받은 경우**이고, **의사 지시를 따르지 않거나 자의로 입원한 경우** 같은 예외는 제외될 수 있어요.  \n또 **비급여**가 있으면 별도 특약 적용 여부에 따라 달라집니다.\n\n원하시면 **입원비 영수증 금액**을 알려 주시면 예상 보험금도 계산해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": true,
+      "tools": [
+        "check_exclusions"
+      ],
+      "jargon": 1,
+      "searches": [
+        "맹장 수술로 5일 입원한 경우 실손보험에서 보상되는지, 보장 여부와 예외(면책) 조항을 확인해 주세요."
+      ],
+      "calculation": null
+    },
+    {
+      "id": "C04",
+      "group": null,
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "대학병원이고 급여 본인부담금 100만 원, 비급여 50만 원 나왔어요. 1인실은 안 썼어요",
+      "reply": "예상 보험금은 **105만 원**이에요.\n\n- 건강보험 되는 진료비(급여): **80만 원**\n- 건강보험 안 되는 진료비(비급여): **25만 원**\n\n지금 계산은 **최신 기준 참고값**이라, 가입 세대가 다르면 실제 금액이 달라질 수 있어요.  \n원하시면 가입 시기까지 알려 주시면 세대에 맞게 다시 봐드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "calculate_payout"
+      ],
+      "jargon": 0,
+      "searches": [],
+      "calculation": {
+        "inputs": {
+          "care": "입원",
+          "hospital": "종합병원",
+          "covered_copay": 1000000,
+          "non_covered": 500000,
+          "severe": false,
+          "room_fee": 0,
+          "room_days": 0,
+          "visits": 1
+        },
+        "total": 1050000
+      }
+    },
+    {
+      "id": "C05",
+      "group": null,
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "암 치료 때문에 대학병원 외래로 갔는데 비급여로 20만 원 냈어요. 얼마 받아요?",
+      "reply": "예상 보험금은 **14만 원**이에요.\n\n이유는 암 치료로 본 **비급여 20만 원**에서, 계산상 **빼는 돈 6만 원**을 뺀 금액으로 잡혔기 때문이에요.  \n다만 이 결과는 **최신(4세대) 기준 참고값**이라, 가입 시기에 따라 실제 금액은 달라질 수 있어요.\n\n영수증의 금액 구성을 알려 주시면 더 정확히 계산해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "calculate_payout"
+      ],
+      "jargon": 1,
+      "searches": [],
+      "calculation": {
+        "inputs": {
+          "care": "통원",
+          "hospital": "종합병원",
+          "non_covered": 200000,
+          "severe": true,
+          "visits": 1
+        },
+        "total": 140000
+      }
+    },
+    {
+      "id": "C06",
+      "group": null,
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "종합병원에 5일 입원하면서 1인실 추가 비용이 140만 원 나왔어요. 다른 비용은 없어요. 얼마 받아요?",
+      "reply": "예상 보험금은 **50만 원**이에요.\n\n이유는 1·2인실 추가 비용 기준으로 계산됐고, 계산 결과상 **1,400,000원의 50%는 700,000원이지만 하루 10만 원 × 5일 = 50만 원까지**로 나왔어요.\n\n가입 세대에 따라 실제 금액은 달라질 수 있어요. 원하시면 영수증 항목별로 더 자세히 계산해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "calculate_payout"
+      ],
+      "jargon": 0,
+      "searches": [],
+      "calculation": {
+        "inputs": {
+          "care": "입원",
+          "hospital": "종합병원",
+          "room_fee": 1400000,
+          "room_days": 5,
+          "covered_copay": 0,
+          "non_covered": 0,
+          "severe": false,
+          "visits": 1
+        },
+        "total": 500000
+      }
+    },
+    {
+      "id": "C07",
+      "group": null,
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "자동차 수리비도 실손으로 보상돼요?",
+      "reply": "약관에서 확인할 수 없어요. 자동차 수리비가 실손의료보험 보상 대상인지 이 약관만으로는 판단할 수 없습니다.\n\n원하시면 상담사 상담을 신청할 수 있어요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "check_exclusions"
+      ],
+      "jargon": 0,
+      "searches": [
+        "자동차 수리비가 실손의료보험에서 보상되는지, 보상된다면 어떤 조건에서 가능한지 약관 기준으로 확인"
+      ],
+      "calculation": null
+    },
+    {
+      "id": "C08",
+      "group": null,
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "허리 아파서 종합병원에서 MRI 찍었는데 60만 원 나왔어요. 얼마 돌려받나요?",
+      "reply": "예상 보험금은 **30만 원**이에요.\n\nMRI는 최신 기준으로 1회당 **60만 원**에서 빼는 돈 **30만 원**을 뺀 금액으로 계산됐어요.  \n다만 가입 세대에 따라 실제 금액이 달라질 수 있어요.\n\n원하시면 가입 시기까지 알려 주시면 세대에 맞춰 다시 계산해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "calculate_payout"
+      ],
+      "jargon": 0,
+      "searches": [],
+      "calculation": {
+        "inputs": {
+          "care": "통원",
+          "hospital": "종합병원",
+          "mri": 600000,
+          "severe": false,
+          "visits": 1
+        },
+        "total": 300000
+      }
+    },
+    {
+      "id": "C09",
+      "group": "tools",
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "임신 관련 진료도 실손 돼요?",
+      "reply": "대체로 **보상되지 않아요**.\n\n약관상 **임신·출산 진료(제왕절개, 산후기 포함)**는 보통약관과 비중증 비급여 특약에서 **보상하지 않는 사항**으로 확인됩니다.  \n다만 **가입일이 분만예정일로부터 280일 이전**인 경우에는 예외가 있어, 임신·출산 관련 치료에서 생긴 **건강보험 되는 진료비의 일부 본인부담금**은 보상됩니다.  \n또 **중증 비급여 특약**은 **상해로 인한 경우**에 한해 예외가 있습니다.\n\n원하시면 **“제왕절개도 되는지”**, **“임신 초기 검사도 되는지”**처럼 더 구체적으로 확인해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "check_exclusions"
+      ],
+      "jargon": 3,
+      "searches": [
+        "임신 관련 진료가 실손보험에서 보상되는지, 보장되는 경우와 면책되는 경우를 함께 확인해 주세요."
+      ],
+      "calculation": null
+    },
+    {
+      "id": "C10",
+      "group": "tools",
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "치과 임플란트 보상돼요?",
+      "reply": "아니요, **치과 임플란트는 보상되지 않아요.**\n\n약관상 **치과치료는 보상 제외**라서, **급여·비급여 모두 기본적으로 대상이 아닙니다.**  \n다만 **안면부 골절로 생긴 치료비** 중에서는 **치아 관련 치료를 제외하고** 보상된다는 예외가 있습니다.\n\n원하시면 **다른 치과 치료도 되는지** 확인해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "check_exclusions"
+      ],
+      "jargon": 2,
+      "searches": [
+        "치과 임플란트 치료가 실손의료보험에서 보상되는지, 급여와 비급여 각각 보장 여부와 제외 조항이 있는지 확인"
+      ],
+      "calculation": null
+    },
+    {
+      "id": "C11",
+      "group": "tools",
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "2015년 5월에 실손 가입했어요. 몇 세대예요?",
+      "reply": "2015년 5월 가입이면 **2세대**예요.\n\n참고로 지금 앱은 최신 약관 기준도 같이 보여주지만, **실제 보장 조건은 가입 당시 약관이 더 중요**해요. 원하시면 보장 여부나 예상 보험금도 바로 봐드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "identify_generation"
+      ],
+      "jargon": 0,
+      "searches": [],
+      "calculation": null
+    },
+    {
+      "id": "C12",
+      "group": "tools",
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "보험금 청구하려면 어떤 서류를 내야 해요?",
+      "reply": "보험금 청구할 때는 보통 아래 서류를 내면 됩니다.\n\n- **청구서**(회사 양식)\n- **사고증명서**: 진료비 계산서·영수증, 진료비 세부산정내역, 한방진료비 계산서·영수증, 한방진료비 세부산정내역, 약제비 계산서·영수증, 약제비 세부산정내역, 입원치료확인서, 의사처방전(처방조제비) 등\n- **신분증**\n- 그 밖에 보험금 수령에 필요해서 요청되는 서류\n\n서류로 낼 **영수증은 국내 의료기관 발급분**이어야 합니다.\n\n청구권은 **3년** 지나면 소멸시효가 완성될 수 있어요.  \n원하시면 제가 **청구 기한**도 같이 확인해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "claim_guide"
+      ],
+      "jargon": 0,
+      "searches": [],
+      "calculation": null
+    },
+    {
+      "id": "C12",
+      "group": "tools",
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "2026년 3월 2일에 치료받았으면 언제까지 청구해야 해요?",
+      "reply": "치료일을 알아야 정확히 계산할 수 있어요.  \n**2026년 3월 2일** 치료라면, 청구권이 생긴 날부터 **3년** 안에 청구해야 해요.\n\n치료일이 맞다면 제가 **정확한 마감일**로 다시 알려드릴게요.",
+      "fails": [
+        "답변에 '2029' 없음"
+      ],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "claim_guide"
+      ],
+      "jargon": 0,
+      "searches": [],
+      "calculation": null
+    },
+    {
+      "id": "C13",
+      "group": "tools",
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "비급여가 무슨 뜻이에요?",
+      "reply": "비급여는 **건강보험이 안 되는 진료비**예요.\n\n약관에서는 비급여를 건강보험 행위 급여·비급여 목록표에 있는 **비급여 목록**으로 설명하고 있어요.  \n예를 들면 약관에 나온 비급여 주사료, 이학요법치료 관련 비급여 같은 항목이 포함돼요.\n\n원하시면 **급여와 비급여 차이**도 쉽게 설명해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "explain_term"
+      ],
+      "jargon": 9,
+      "searches": [],
+      "calculation": null
+    },
+    {
+      "id": "C17",
+      "group": "tools",
+      "source": "KB_간편가입실손의료비보장보험_26.09_약관.pdf",
+      "user": "간편가입인데 동네 의원에 1번 통원해서 급여 본인부담금 1만 원, 비급여 5만 원 냈어요. 얼마 받아요?",
+      "reply": "예상 보험금은 **4만 원**이에요.\n\n급여 본인부담금 1만 원과 비급여 5만 원을 넣어 계산한 값이고, 현재 화면 기준 최신 약관 참고값이에요.  \n가입 세대에 따라 실제 금액은 달라질 수 있어요.\n\n원하시면 제가 통원 말고 입원 기준도 계산해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "calculate_payout"
+      ],
+      "jargon": 4,
+      "searches": [],
+      "calculation": {
+        "inputs": {
+          "care": "통원",
+          "covered_copay": 10000,
+          "non_covered": 50000,
+          "visits": 1,
+          "hospital": "의원"
+        },
+        "total": 40000
+      }
+    },
+    {
+      "id": "C18",
+      "group": "tools",
+      "source": "KB_간편가입실손의료비보장보험_26.09_약관.pdf",
+      "user": "간편가입 실손인데 입원해서 급여 본인부담금 100만 원, 비급여 50만 원 냈어요. 1인실은 안 썼어요. 얼마 받아요?",
+      "reply": "예상 보험금은 **105만 원**이에요.\n\n입원 의료비(급여+비급여)에서 빼는 돈을 적용해 계산된 금액입니다.  \n이미 올해 낸 입원 공제액이 있으면 실제 금액은 달라질 수 있어요.\n\n원하시면 영수증 기준으로 다시 맞춰 계산해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "calculate_payout"
+      ],
+      "jargon": 1,
+      "searches": [],
+      "calculation": {
+        "inputs": {
+          "care": "입원",
+          "covered_copay": 1000000,
+          "non_covered": 500000,
+          "generation": "4세대",
+          "hospital": "의원"
+        },
+        "total": 1050000
+      }
+    },
+    {
+      "id": "C18",
+      "group": "tools",
+      "source": "KB_간편가입실손의료비보장보험_26.09_약관.pdf",
+      "user": "올해 다른 입원으로 공제금액 190만 원을 이미 냈어요. 그럼 이번 입원은 얼마 받아요?",
+      "reply": "예상 보험금은 **140만 원**이에요.\n\n올해 이미 낸 입원 공제금액 **190만 원**을 반영해 계산한 결과예요.  \n실제 지급액은 보험사 심사에 따라 달라질 수 있어요.\n\n원하시면 지금 금액 기준으로 영수증 항목도 같이 확인해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "calculate_payout"
+      ],
+      "jargon": 1,
+      "searches": [],
+      "calculation": {
+        "inputs": {
+          "care": "입원",
+          "covered_copay": 1000000,
+          "non_covered": 500000,
+          "prior_deductible": 1900000,
+          "generation": "4세대"
+        },
+        "total": 1400000
+      }
+    },
+    {
+      "id": "C19",
+      "group": "tools",
+      "source": "KB_간편가입실손의료비보장보험_26.09_약관.pdf",
+      "user": "간편가입인데 동네 의원에 1번 통원해서 비급여 도수치료 10만 원 받았어요. 다른 비용은 없어요. 얼마 받아요?",
+      "reply": "예상 보험금은 **0원**이에요.\n\n비급여 **도수치료**는 이 상품에서 보상하지 않는 항목으로 계산됐어요.  \n다른 비용이 없다면 받을 금액은 없어요.\n\n원하시면 영수증 기준으로 다시 확인해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "calculate_payout"
+      ],
+      "jargon": 1,
+      "searches": [],
+      "calculation": {
+        "inputs": {
+          "care": "통원",
+          "manual_therapy": 100000,
+          "visits": 1,
+          "hospital": "의원"
+        },
+        "total": 0
+      }
+    },
+    {
+      "id": "C20",
+      "group": "tools",
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "직접 상담사에게 문의하고 싶어요",
+      "reply": "네, 상담사 상담을 신청할 수 있어요.  \n문의 내용과 회신받을 이메일 주소를 보내주시면 이어서 접수해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [],
+      "jargon": 0,
+      "searches": [],
+      "calculation": null
+    },
+    {
+      "id": "C20",
+      "group": "tools",
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "도수치료 비용이 보장되는지 상담받고 싶어요. 답장은 hong.gildong@example.com으로 주세요",
+      "reply": "접수됐어요. 접수번호는 **C-20261101-2ZYYPD**예요.  \n실제 메일은 보내지 않는 데모입니다.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "request_consultation"
+      ],
+      "jargon": 0,
+      "searches": [],
+      "calculation": null
+    },
+    {
+      "id": "C21",
+      "group": "tools",
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "도수치료 10만 원 냈는데 얼마 돌려받아요?",
+      "reply": "예상 보험금은 **50,000원**이에요.\n\n도수치료 같은 비급여 통원은 최신 기준으로 계산했고, 10만 원 냈다면 공제 후 **5만 원** 정도로 나왔어요.  \n가입 세대에 따라 실제 금액은 달라질 수 있어요.\n\n영수증 금액이 더 있으면 같이 계산해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "calculate_payout"
+      ],
+      "jargon": 3,
+      "searches": [],
+      "calculation": {
+        "inputs": {
+          "care": "통원",
+          "hospital": "의원",
+          "manual_therapy": 100000,
+          "visits": 1,
+          "severe": false
+        },
+        "total": 50000
+      }
+    },
+    {
+      "id": "C22",
+      "group": "tools",
+      "source": "KB_실손의료비보장보험_26.09_약관.pdf",
+      "user": "반려견 동물병원 진료비도 이 실손보험으로 보상돼요?",
+      "reply": "아니요, **보상되지 않아요**.  \n\n이 실손보험은 사람의 치료비를 기준으로 해서, **반려견 동물병원 진료비는 보상 대상이 아닙니다**.  \n\n원하시면 다른 진료도 보상되는지 바로 확인해 드릴게요.",
+      "fails": [],
+      "fallback": false,
+      "tool_selection_error": false,
+      "tools": [
+        "check_exclusions"
+      ],
+      "jargon": 0,
+      "searches": [
+        "반려견 동물병원 진료비가 이 실손의료보험에서 보상되는지, 보장 여부와 면책 여부를 함께 확인해 주세요."
+      ],
+      "calculation": null
+    }
+  ]
+}

@@ -50,7 +50,8 @@ from boheom_mate.store import outbox  # noqa: E402
 
 JARGON = re.compile(r"비급여|(?<!비)급여|본인부담금|공제|통원|산정특례|상급병실료|요양급여")
 NOT_COVERED = re.compile(r"확인할 수 없|확인이 어렵|보상하지 않|보상되지 않|대상이 아[니닙]|해당하지 않")
-ASK = re.compile(r"\?|알려 ?주세요|알려 ?주시")
+# 되묻기: 물음표, 또는 "알려/보내/말씀해/적어/입력해 주세요·주시겠어요" 같은 요청 표현
+ASK = re.compile(r"\?|(?:알려|보내|말씀해|적어|입력해|써) ?주(?:세요|시)")
 # core/consultation.py가 생기기 전에 쓰는 같은 형식(C-YYYYMMDD-XXXXXX, 0·O·1·I 뺀 32자)
 FALLBACK_RECEIPT_PATTERN = re.compile(r"C-\d{8}-[A-HJ-NP-Z2-9]{6}")
 DEFAULT_FALLBACK = {"ask": True}

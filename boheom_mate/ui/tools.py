@@ -4,6 +4,7 @@
 - dispatch(name, args, bound, ctx): 도구 하나를 실행하고 LLM에 돌려줄 Tool_Result(dict)를 만든다.
 도구는 source를 인자로 받지 않고 Ctx.source를 쓴다. 근거는 ctx.add_evidence로 turn["evidence"]에 넣는다.
 """
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -227,6 +228,342 @@ def run_calculate(args, ctx):
     return {k: v for k, v in result.items() if k != "rules_used"}
 
 
+# ---- check_exclusions ---------------------------------------------------------------------------
+
+EXCLUSIONS_RULES = """[보상 여부 확인]
+- 약관에서 보상하지 않을 수 있는 치료·항목(예: 임신·출산, 치과, 미용·성형, 임플란트, 한방 등)이 보상되는지 콕 집어 물을 때만
+  check_exclusions를 부르세요. 금액 질문에는 쓰지 마세요.
+- 어떤 병으로 병원에 가거나 입원·수술했는데 보장되는지처럼 일반적인 보장 질문은 search_terms를 부르세요.
+- 결과가 conclusive=false면 보상된다/안 된다를 단정하지 말고, 확인한 쪽 조항 내용만 안내하세요.
+- 결과가 found=false면 "약관에서 확인할 수 없다"고 말하세요.
+"""
+
+EXCLUSIONS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "check_exclusions",
+        "description": ("면책일 수 있는 특정 치료·항목(임신·출산, 치과, 미용, 임플란트 등)이 보상되는지 물을 때만. "
+                        "보장 조항과 면책 조항을 함께 확인한다. 일반 보장 질문은 search_terms, 금액 질문에는 쓰지 않는다."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "앞 대화를 반영한, 혼자 읽어도 뜻이 통하는 완전한 질문"},
+            },
+            "required": ["question"],
+        },
+    },
+}
+EXCLUSIONS_COVERAGE_PER_SECTION = 2
+EXCLUSIONS_EXCLUSION_PER_SECTION = 3
+
+
+def _exclusions_available(ctx):
+    from boheom_mate.core import articles
+    inv = ctx.inventory or {}
+    return inv.get(articles.COVERAGE, 0) > 0 and inv.get(articles.EXCLUSION, 0) > 0
+
+
+def run_exclusions(args, ctx):
+    """design.md 9.3: 보장(구역당 2)·면책(모든 구역, 구역당 3)을 따로 골라 rag.answer로 답한다."""
+    from boheom_mate.core import articles
+    question = args.get("question")
+    if not isinstance(question, str) or not question.strip():
+        raise ValueError("question이 비어 있습니다.")
+    coverage = articles.rank(question, articles.locate(ctx.source, articles.COVERAGE),
+                             per_section=EXCLUSIONS_COVERAGE_PER_SECTION)
+    exclusions = articles.rank(question, articles.locate(ctx.source, articles.EXCLUSION),
+                               per_section=EXCLUSIONS_EXCLUSION_PER_SECTION)
+    picked = coverage + exclusions
+    result = rag.answer(question, ctx.source, articles=picked) if picked else {
+        "found": False, "answer": rag.NOT_FOUND_MESSAGE, "evidence": [], "summary": None}
+    found = bool(result["found"] and picked)
+    ctx.turn["searches"].append(question)
+    ctx.turn["summary"] = ctx.turn["summary"] or result.get("summary")
+    evidence = result["evidence"] if found else []
+    ctx.add_evidence(evidence)  # rag.answer가 번호·강조 문장을 검증한 조각만
+    return {
+        "found": found,
+        "conclusive": bool(coverage) and bool(exclusions),
+        "answer": result["answer"] if found else rag.NOT_FOUND_MESSAGE,
+        "coverage": [evidence_label(c) for c in coverage],
+        "exclusions": [evidence_label(c) for c in exclusions],
+        "cited": [evidence_label(e) for e in evidence],
+    }
+
+
+# ---- identify_generation ------------------------------------------------------------------------
+
+GENERATION_RULES = """[세대 확인]
+- 사용자가 실손 가입 시기(연도·월)를 말하거나 몇 세대인지 물으면 identify_generation을 부르세요. 세대를 직접 정하지 마세요.
+- 결과에 need가 있으면 그 값(joined_year: 가입 연도, joined_month: 가입 월)을 한 번 물어보세요.
+- warning이 있으면 그대로 전하세요. latest_rules는 최신 약관(이 상품) 기준 값이며 가입 세대의 값이 아닙니다.
+  1~3세대의 자기부담률·공제금액 숫자는 지어내지 마세요.
+"""
+
+GENERATION_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "identify_generation",
+        "description": "사용자가 말한 실손 가입 연도·월로 가입 세대(1~4세대)를 확인한다.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "joined_year": {"type": "integer", "description": "사용자가 말한 실손 가입 연도"},
+                "joined_month": {"type": "integer", "description": "사용자가 말한 실손 가입 월(1~12). 모르면 넣지 않는다"},
+            },
+            "required": ["joined_year"],
+        },
+    },
+}
+
+GENERATION_WARNING = ("현재 앱의 약관·계산은 최신 약관 기준 참고 정보이며 가입하신 세대의 약관과 "
+                      "자기부담률·보장이 다를 수 있으니 보험증권과 가입 당시 약관을 확인하세요")
+OLD_GENERATIONS = ("1세대", "2세대", "3세대")
+
+# 최신 약관 대비 차이 안내에 쓰는 현재 상품 Verified_Value(자기부담·공제). 라벨에는 숫자를 넣지 않는다(Req 5.4)
+LATEST_RULE_LABELS = {
+    policy_rules.PROFILE_BASE: {
+        "covered_inpatient_pay_rate": "급여 입원 보상 비율",
+        "covered_outpatient_clinic_deduct": "급여 통원 공제금액(의원·병원)",
+        "non_severe_inpatient_pay_rate": "비중증 비급여 입원 보상 비율",
+    },
+    policy_rules.PROFILE_SIMPLE: {
+        "simple_inpatient_deduct": "입원 공제금액(정액)",
+        "simple_inpatient_rate": "입원 공제 비율",
+        "simple_outpatient_deduct": "통원 1회당 공제금액",
+    },
+}
+
+# [금액 계산]의 세대 경계 안내 문장. identify_generation이 bound이면 GENERATION_HINT로 바꾼다
+CALCULATE_GENERATION_LINE = ("- 가입 세대를 모르면 한 번 물어보세요(가입 시기: 2009.10 이전=1세대, ~2017.3=2세대, "
+                             "~2021.6=3세대, 2021.7 이후=4세대).\n")
+GENERATION_HINT = "- 가입 시기를 말하면 identify_generation으로 세대를 확인하세요.\n"
+
+
+def _year_ok(year):
+    return isinstance(year, int) and not isinstance(year, bool) and 1990 <= year <= 2100
+
+
+def _latest_rules(rule_set):
+    """현재 상품 Verified_Value 중 자기부담·공제 값과 그 인용문. rule_set이 ok가 아니면 빈 목록."""
+    if not (rule_set or {}).get("ok"):
+        return [], []
+    labels = LATEST_RULE_LABELS.get(rule_set.get("profile"), {})
+    values, quotes = rule_set.get("values") or {}, rule_set.get("quotes") or {}
+    keys = [k for k in labels if values.get(k) is not None and quotes.get(k)]
+    return [{"label": labels[k], "value": values[k], "quote": quotes[k]} for k in keys], keys
+
+
+def run_generation(args, ctx):
+    """design.md 9.4: memory.generation_of로 세대를 정하고, 모르면 need로 되묻게 한다."""
+    year, month = args.get("joined_year"), args.get("joined_month")
+    generation = session_memory.generation_of(year, month)
+    need = None
+    if generation is None:
+        need = "joined_month" if _year_ok(year) else "joined_year"
+    latest, keys = _latest_rules(ctx.rule_set)
+    if generation is not None:
+        month_ok = isinstance(month, int) and not isinstance(month, bool) and 1 <= month <= 12
+        ctx.turn["memory_updates"].update({"joined_year": year, "joined_month": month if month_ok else None,
+                                           "generation": generation})
+    if keys:
+        ctx.add_evidence(policy_rules.evidence(ctx.rule_set, keys))
+    return {
+        "generation": generation,
+        "need": need,
+        "warning": GENERATION_WARNING if generation in OLD_GENERATIONS else None,
+        "latest_rules": latest,
+    }
+
+
+# ---- claim_guide --------------------------------------------------------------------------------
+
+CLAIM_RULES = """[청구 서류·기한]
+- 보험금 청구 서류나 청구 기한을 물으면 claim_guide를 부르세요. 서류 목록과 기한은 결과의 약관 원문으로만 말하세요.
+- 사용자가 이번 또는 앞 대화에서 치료일·사고일·청구권이 생긴 날을 말했으면 YYYY-MM-DD로 바꿔 treatment_date에 꼭 넣으세요.
+  예: "2026년 3월 2일" → "2026-03-02"
+- 치료일을 말한 적이 없을 때만 treatment_date 없이 부르고, 결과에 need가 있으면 치료일을 한 번 물어보세요.
+- deadline이 있으면 날짜와 함께 deadline_note를 그대로 전하세요. deadline이 null이면 날짜를 지어내지 말고 limitation_article 원문만 안내하세요.
+"""
+
+CLAIM_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "claim_guide",
+        "description": "보험금 청구 서류나 청구 기한을 물을 때. 사용자가 사고일·청구권 발생일을 말해도 치료일로 넣는다.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "treatment_date": {"type": "string", "description": ("치료일(YYYY-MM-DD). 사용자가 이번 또는 앞 대화에서 치료일·사고일을 말했으면 "
+                                                   "이 형식으로 바꿔 반드시 넣는다(예: 2026년 3월 2일 → 2026-03-02)")},
+            },
+        },
+    },
+}
+CLAIM_DOCUMENTS_MAX_CHARS = 1500
+CLAIM_LIMITATION_MAX_CHARS = 800
+CLAIM_DOCUMENTS_MARK = "영수증"
+CLAIM_LIMITATION_MARK = "소멸시효"
+DEADLINE_BASIS = "치료일 기준 참고 날짜"
+
+
+def _claim_available(ctx):
+    from boheom_mate.core import articles
+    return (ctx.inventory or {}).get(articles.CLAIM, 0) > 0
+
+
+def _squash(text):
+    return "".join((text or "").split())
+
+
+def _marked_evidence(chunks, mark):
+    """조각마다 mark가 든 문장(원문에 있는 것만)을 highlights로 붙인 근거 항목."""
+    out = []
+    for c in chunks:
+        text = c.get("text") or ""
+        whole = _squash(text)
+        highlights = [s for s in policy_rules._sentences(text) if mark in s and _squash(s) in whole]
+        out.append({"section": c.get("section", ""), "article_no": c.get("article_no", ""),
+                    "title": c.get("title", ""), "text": text, "highlights": highlights})
+    return out
+
+
+def _joined(chunks, limit):
+    return "\n\n".join(c.get("text") or "" for c in chunks)[:limit]
+
+
+def run_claim(args, ctx):
+    """design.md 9.5: 청구·소멸시효 조항 원문을 근거로 넣고, 기간이 검증됐을 때만 치료일 + N년 참고 날짜를 계산한다."""
+    from boheom_mate.core import articles, claim
+    documents = articles.locate(ctx.source, articles.CLAIM)
+    limitation = articles.locate(ctx.source, articles.LIMITATION)
+    ctx.add_evidence(_marked_evidence(documents, CLAIM_DOCUMENTS_MARK))
+    ctx.add_evidence(_marked_evidence(limitation, CLAIM_LIMITATION_MARK))
+    years = ((ctx.rule_set or {}).get("limitation") or {}).get("years")
+    treatment_date = args.get("treatment_date")
+    if isinstance(treatment_date, str) and not treatment_date.strip():
+        treatment_date = None
+    deadline = basis = note = need = None
+    if treatment_date is None:
+        need = "treatment_date"
+    elif years is not None:
+        deadline = claim.reference_deadline(claim.parse_date(treatment_date), years).isoformat()
+        basis, note = DEADLINE_BASIS, claim.DEADLINE_NOTE
+    return {
+        "documents_article": _joined(documents, CLAIM_DOCUMENTS_MAX_CHARS),
+        "limitation_article": _joined(limitation, CLAIM_LIMITATION_MAX_CHARS),
+        "limitation_years": years,
+        "deadline": deadline,
+        "deadline_basis": basis,
+        "deadline_note": note,
+        "need": need,
+    }
+
+
+# ---- explain_term -------------------------------------------------------------------------------
+
+TERM_RULES = """[용어 풀이]
+- "비급여가 뭐예요?"처럼 약관 용어의 뜻을 물으면 explain_term을 부르세요.
+- 뜻은 결과 definitions의 sentences(약관 정의 원문)로만 쉽게 풀어 말하세요. 원문에 없는 뜻을 지어내지 마세요.
+- 결과가 found=false면 "약관에서 확인할 수 없다"고 말하세요.
+"""
+
+TERM_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "explain_term",
+        "description": "약관 용어의 뜻을 물을 때(예: 비급여가 뭐예요?).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "term": {"type": "string", "description": "뜻을 물은 용어(예: 비급여)"},
+            },
+            "required": ["term"],
+        },
+    },
+}
+TERM_MAX_DEFINITIONS = 3
+TERM_SENTENCE_MAX_CHARS = 300   # 표 형태라 문장이 이보다 길면 후보 말이 든 원문 줄만 고른다
+_TERM_SPLIT = re.compile(r"[\s·,]+")
+_PARENS = re.compile(r"\([^()]*\)")
+
+
+def _term_available(ctx):
+    from boheom_mate.core import articles
+    return (ctx.inventory or {}).get(articles.DEFINITION, 0) > 0
+
+
+def _term_candidates(term):
+    """[term] + glossary.lookup(term) 용어에서 괄호 부분을 뺀 2자 이상 낱말(순서 유지, 중복 없음)."""
+    from boheom_mate.core import glossary
+    out = [term]
+    for mapped in glossary.lookup(term):
+        out.extend(w for w in _TERM_SPLIT.split(_PARENS.sub(" ", mapped)) if len(w) >= 2)
+    seen, result = set(), []
+    for w in out:
+        key = policy_rules._norm(w)
+        if key and key not in seen:
+            seen.add(key)
+            result.append(w)
+    return result
+
+
+def _definition_form(word, text):
+    w = re.escape(word)
+    return re.search(rf"{w}\s*[:：]|['‘]{w}['’](이)?란|[\"“]{w}[\"”]\s*(이)?라\s*함은", text) is not None
+
+
+def _term_highlights(text, word):
+    """word가 든 문장을 원문 그대로. 긴(표 형태) 문장은 word가 든 원문 줄로 바꾼다. 원문에 없는 것은 뺀다."""
+    key, whole = policy_rules._norm(word), _squash(text)
+    picked = []
+    for s in policy_rules._sentences(text):
+        if key not in policy_rules._norm(s):
+            continue
+        if len(s) > TERM_SENTENCE_MAX_CHARS:
+            picked.extend(ln.strip() for ln in s.split("\n") if key in policy_rules._norm(ln))
+        else:
+            picked.append(s)
+    return [h for h in dict.fromkeys(picked) if h and _squash(h) in whole]
+
+
+def run_term(args, ctx):
+    """design.md 9.6: 일상어를 약관 용어로 바꿔 Definition_Article에서 그 말이 든 정의 조각 상위 3개를 찾는다."""
+    from boheom_mate.core import articles
+    term = args.get("term")
+    if not isinstance(term, str) or not term.strip():
+        raise ValueError("term이 비어 있습니다.")
+    term = term.strip()
+    candidates = _term_candidates(term)
+    scored, matched = [], []
+    for order, chunk in enumerate(articles.locate(ctx.source, articles.DEFINITION)):
+        norm = policy_rules._norm(chunk.get("text"))
+        hits = [i for i, w in enumerate(candidates) if policy_rules._norm(w) in norm]
+        if not hits:
+            continue
+        matched.extend(candidates[i] for i in hits if candidates[i] not in matched)
+        word = candidates[hits[0]]
+        defined = _definition_form(word, chunk.get("text") or "")
+        scored.append(((hits[0], not defined, order), chunk, word))
+    scored.sort(key=lambda x: x[0])
+    evidence = []
+    for _, chunk, word in scored[:TERM_MAX_DEFINITIONS]:
+        text = chunk.get("text") or ""
+        evidence.append({"section": chunk.get("section", ""), "article_no": chunk.get("article_no", ""),
+                         "title": chunk.get("title", ""), "text": text,
+                         "highlights": _term_highlights(text, word)})
+    ctx.add_evidence(evidence)
+    result = {
+        "found": bool(evidence),
+        "term": term,
+        "matched_terms": [w for w in candidates if w in matched],
+        "definitions": [{"label": evidence_label(e), "sentences": e["highlights"]} for e in evidence],
+    }
+    if not evidence:
+        result["answer"] = rag.NOT_FOUND_MESSAGE
+    return result
+
+
 # ---- request_consultation -----------------------------------------------------------------------
 # 회신 이메일이 새지 않도록 이 어댑터는 print·logging을 쓰지 않는다(Req 11.6, 14.6).
 CONSULT_NOTIFY = True            # 평가(run_chat)는 False로 끈다
@@ -320,6 +657,14 @@ REGISTRY = [
     Tool(name="calculate_payout", schema=CALCULATE_TOOL, rules=CALCULATE_RULES,
          available=lambda ctx: bool((ctx.rule_set or {}).get("ok")), run=run_calculate, disclaimer=True,
          schema_for=lambda ctx: calculate_schema((ctx.rule_set or {}).get("profile"))),
+    Tool(name="check_exclusions", schema=EXCLUSIONS_TOOL, rules=EXCLUSIONS_RULES,
+         available=_exclusions_available, run=run_exclusions, disclaimer=True),
+    Tool(name="identify_generation", schema=GENERATION_TOOL, rules=GENERATION_RULES,
+         available=lambda ctx: True, run=run_generation, disclaimer=True),
+    Tool(name="claim_guide", schema=CLAIM_TOOL, rules=CLAIM_RULES,
+         available=_claim_available, run=run_claim, disclaimer=True),
+    Tool(name="explain_term", schema=TERM_TOOL, rules=TERM_RULES,
+         available=_term_available, run=run_term, disclaimer=False),
     Tool(name="request_consultation", schema=CONSULT_TOOL, rules=CONSULT_RULES,
          available=lambda ctx: True, run=run_consultation, disclaimer=False),
 ]
