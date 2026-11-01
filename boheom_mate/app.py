@@ -156,18 +156,14 @@ def pick_product(sources):
 def start_outbound(action, messages, source, memory, reason=""):
     """보내기 미리보기를 만든다. 실제 전송은 render_outbound에서 사용자가 버튼을 눌렀을 때만 한다."""
     last_q = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
-    last_a = next((m for m in reversed(messages) if m["role"] == "assistant"), {})
-    if action == "report_issue":
-        draft = outbound.issue_draft(last_q, last_a.get("content", ""), last_a.get("evidence"), source, reason)
-    else:
-        draft = outbound.handoff_draft(last_q, session_memory.describe(memory), source, reason)
+    draft = outbound.handoff_draft(last_q, session_memory.describe(memory), source, reason)
     for key in ("outbound_text", "outbound_agree"):  # 새 초안이 이전 입력칸 값에 덮이지 않게
         st.session_state.pop(key, None)
     st.session_state.outbound = {"action": action, "text": outbound.preview_text(action, draft)}
 
 
 def render_outbound():
-    """MCP로 보내기 전 미리보기. 사용자가 내용을 고치고 동의해야만 보낸다(GPT는 보낼 수 없다)."""
+    """Slack(MCP)으로 보내기 전 미리보기. 사용자가 내용을 고치고 동의해야만 보낸다."""
     pending = st.session_state.get("outbound")
     if not pending:
         return
@@ -235,8 +231,7 @@ def render_questions():
     if messages and actions and not st.session_state.get("outbound"):
         cols = st.columns(len(actions))
         for col, action in zip(cols, actions):
-            label = "이 답이 틀렸어요" if action == "report_issue" else "설계사와 상담하고 싶어요"
-            if col.button(label, key=f"start_{action}"):
+            if col.button("설계사와 상담하고 싶어요", key=f"start_{action}"):
                 start_outbound(action, messages, source, memory)
                 st.rerun()
     render_outbound()
@@ -269,10 +264,6 @@ def render_questions():
     if result["calculation"]:
         memory = session_memory.merge_calculation(memory, result["calculation"].get("inputs"))
     question_store.save_memory(session_id, memory)
-    if result.get("pending_action"):
-        done = messages + [{"role": "user", "content": text},
-                           {"role": "assistant", "content": result["content"], "evidence": result["evidence"]}]
-        start_outbound(result["pending_action"]["action"], done, source, memory, result["pending_action"]["reason"])
     st.rerun()
 
 
