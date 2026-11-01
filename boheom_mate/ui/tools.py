@@ -12,11 +12,13 @@ from typing import Callable
 
 from boheom_mate.core import calculator
 from boheom_mate.core import consultation
+from boheom_mate.core import kcd
 from boheom_mate.core import memory as session_memory
 from boheom_mate.core import policy_rules
 from boheom_mate.core import rag
 from boheom_mate.integrations import hira_hospital
 from boheom_mate.integrations import mcp_client
+from boheom_mate.store import kcd_index
 from boheom_mate.store import outbox
 
 DISCLAIMER = calculator.DISCLAIMER
@@ -660,6 +662,86 @@ def _hospital_available(ctx):
     return hira_hospital.has_key()
 
 
+# ---- lookup_kcd ---------------------------------------------------------------------------------
+
+KCD_RULES = """[질병코드 대조]
+- 사용자가 이번 대화에서 직접 말한 병명·질병코드가 약관 면책 대상인지 물을 때만 lookup_kcd를 부르세요. 병명을 먼저 묻지 마세요.
+- matches만으로 보상되지 않는다고 단정하지 말고 exclusions_check와 함께 안내하세요.
+  label이 "면책 예외(보상 가능성 있음)"인 매치는 면책으로 안내하지 마세요. warning은 그대로 전하세요.
+- found=false면 코드 대조 없이 exclusions_check로만 안내하세요.
+"""
+
+KCD_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "lookup_kcd",
+        "description": "사용자가 이번 대화에서 직접 말한 병명·질병코드의 면책 코드 범위를 대조할 때만. 병명을 먼저 묻지 않는다.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "disease": {"type": "string", "description": "사용자가 말한 병명이나 질병코드(예: 우울증, F32)"},
+            },
+            "required": ["disease"],
+        },
+    },
+}
+KCD_WARNING = ("질병코드는 병명으로 찾은 후보이며 실제 진단서의 코드와 다를 수 있습니다. "
+               "보상 여부는 약관 조항과 보험사 심사로 확정됩니다")
+KCD_KIND_LABELS = {"excluded": "면책", "exception": "면책 예외(보상 가능성 있음)"}
+
+
+def _kcd_available(ctx):
+    return (bool((ctx.rule_set or {}).get("code_ranges")) and _exclusions_available(ctx)
+            and kcd_index.available())
+
+
+def _kind_summary(items):
+    kinds = {i["kind_summary"] for i in items}
+    if not kinds:
+        return None
+    if kinds == {"exception"}:
+        return "exception"
+    if kinds == {"excluded"}:
+        return "excluded"
+    return "excluded_with_exception"
+
+
+def run_kcd(args, ctx):
+    """design.md 9.9: 로컬 색인으로 후보 코드를 찾고 면책 코드 범위와 대조한 뒤, 같은 실행 안에서
+    check_exclusions를 돌린다(D8). 병명은 외부로 보내지 않고, 결과는 메모에 넣지 않는다(Req 11.4)."""
+    disease = args.get("disease")
+    if not isinstance(disease, str) or not disease.strip():
+        raise ValueError("disease가 비어 있습니다.")
+    disease = disease.strip()
+    try:
+        candidates = kcd_index.lookup(disease)
+    except sqlite3.Error:
+        candidates = []
+    items = kcd.match([{"code": c["code"], "name": c["name_ko"]} for c in candidates],
+                      (ctx.rule_set or {}).get("code_ranges") or [])
+    for item in items:
+        for m in item["matches"]:
+            m["label"] = KCD_KIND_LABELS.get(m["kind"], m["kind"])
+            if m.get("quote"):
+                ctx.add_evidence([{"section": m.get("section") or "", "article_no": m.get("article_no") or "",
+                                   "title": m.get("title") or "", "text": m["quote"],
+                                   "highlights": [m["quote"]]}])
+    ctx.turn["tools"].append("check_exclusions")
+    try:
+        exclusions_check = run_exclusions({"question": f"{disease} 치료 보상 여부"}, ctx)
+    except CAUGHT_ERRORS as e:
+        exclusions_check = {"error": str(e)}
+    return {
+        "found": bool(candidates),
+        "candidates": candidates,
+        "matches": items,
+        "kind_summary": _kind_summary(items),
+        "exclusions_check": exclusions_check,
+        "warning": KCD_WARNING,
+        "source_note": kcd_index.source_note(),
+    }
+
+
 # ---- request_consultation -----------------------------------------------------------------------
 # 회신 이메일이 새지 않도록 이 어댑터는 print·logging을 쓰지 않는다(Req 11.6, 14.6).
 CONSULT_NOTIFY = True            # 평가(run_chat)는 False로 끈다
@@ -765,6 +847,8 @@ REGISTRY = [
          available=_term_available, run=run_term, disclaimer=False),
     Tool(name="classify_hospital", schema=HOSPITAL_TOOL, rules=HOSPITAL_RULES,
          available=_hospital_available, run=run_hospital, disclaimer=False),
+    Tool(name="lookup_kcd", schema=KCD_TOOL, rules=KCD_RULES,
+         available=_kcd_available, run=run_kcd, disclaimer=True),
     Tool(name="request_consultation", schema=CONSULT_TOOL, rules=CONSULT_RULES,
          available=lambda ctx: True, run=run_consultation, disclaimer=False),
 ]

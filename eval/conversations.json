@@ -60,6 +60,11 @@
    "turns": [
     {"user": "서울아산병원 외래에서 급여 본인부담금 3만 원 냈어요. 얼마 받아요?", "requires": ["hira_key"], "expect": {"tool": "classify_hospital", "calc": 10000}, "expect_fallback": {"ask": true}}
   ]},
+  {"id": "C16", "group": "tools", "name": "질병코드 조회: 우울증 정신건강의학과",
+   "note": "KCD 색인이 있으면 lookup_kcd로 질병코드 후보를 찾고 면책 조항(보상하지 않는 사항)과 함께 안내. 색인이 없으면 check_exclusions로만 답하고 lookup_kcd는 부르지 않음",
+   "turns": [
+    {"user": "우울증으로 정신건강의학과 다니는데 실손 돼요?", "requires": ["kcd_index"], "expect": {"tool": "lookup_kcd", "evidence_title": "보상하지 않는 사항"}, "expect_fallback": {"tool": "check_exclusions", "no_tool": ["lookup_kcd"]}}
+  ]},
   {"id": "C17", "group": "tools", "source": "KB_간편가입실손의료비보장보험_26.09_약관.pdf",
    "name": "간편가입 통원 (기대 40,000원)",
    "note": "보장대상의료비 C=10,000+50,000=60,000. 통원 공제 max(20,000, 60,000×30%=18,000)=20,000. 60,000−20,000=40,000, 통원 회당 한도 20만 원 이하",
