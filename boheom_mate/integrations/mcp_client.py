@@ -1,13 +1,12 @@
-"""MCP 클라이언트: 외부 MCP 서버(GitHub, Slack)의 도구를 코드가 대신 호출한다.
+"""MCP 클라이언트: 외부 MCP 서버(Slack)의 도구를 코드가 대신 호출한다.
 
 켜는 법: .env에 토큰과 보낼 곳만 넣으면 된다(.env.example 참고). 넣은 서버만 켜지고, 없으면 기능이 숨는다.
 넣은 뒤 확인(아무것도 보내지 않음): .venv/bin/python -m boheom_mate.integrations.mcp_client --check
 
 안전 규칙(로그인 없는 방문자가 쓰는 앱이라 운영자 계정 권한을 함부로 쓰지 않게 한다):
 - 행동마다 허용한 "메시지 보내기 / 이슈 만들기" 도구만 부른다. 서버가 다른 도구를 줘도 쓰지 않는다.
-- LLM에게 MCP 도구를 직접 bind하지 않는다. LLM은 미리보기만 만들고(chat.prepare_action),
-  사용자가 화면에서 확인하고 '보내기'를 눌렀을 때만 execute()가 보낸다.
-- 보낼 곳(GitHub 저장소, Slack 채널)은 환경변수로 고정한다. LLM 인자로 받지 않는다.
+- LLM에게 MCP 도구를 주지 않는다. 사용자가 화면에서 미리보기를 확인하고 '보내기'를 눌렀을 때만 execute()가 보낸다.
+- 보낼 곳(Slack 채널)은 환경변수로 고정한다. LLM 인자로 받지 않는다.
 - 토큰은 .env에서만 읽고, 오류 메시지·로그·화면에 넣지 않는다.
 
 Streamlit은 동기 코드라서 MCP(비동기) 호출을 asyncio.run으로 감싼다.
@@ -31,26 +30,14 @@ def _http(url, token_env):
 
 
 # ---------- 서버 ----------
-# GitHub 공식 서버 https://github.com/github/github-mcp-server (원격, fine-grained PAT: 대상 저장소 Issues 쓰기)
 # Slack 공식 서버 https://docs.slack.dev/ai/slack-mcp-server/ (Streamable HTTP, 사용자 토큰 xoxp, chat:write)
 SERVERS = {
-    "github": {
-        "label": "GitHub",
-        "env": ["GITHUB_MCP_TOKEN", "GITHUB_ISSUE_REPO"],
-        "connection": lambda: _http(os.getenv("GITHUB_MCP_URL", "https://api.githubcopilot.com/mcp/"), "GITHUB_MCP_TOKEN"),
-    },
     "slack": {
         "label": "Slack",
         "env": ["SLACK_MCP_USER_TOKEN", "SLACK_HANDOFF_CHANNEL_ID"],
         "connection": lambda: _http(os.getenv("SLACK_MCP_URL", "https://mcp.slack.com/mcp"), "SLACK_MCP_USER_TOKEN"),
     },
 }
-
-
-def _github_values(draft):
-    owner, repo = os.environ["GITHUB_ISSUE_REPO"].strip().split("/", 1)
-    # 라벨은 넣지 않는다(저장소에 없는 라벨이면 실패할 수 있다). 제목 앞의 [답변 오류 신고]로 구분한다.
-    return {"method": "create", "owner": owner, "repo": repo, "title": draft["title"], "body": draft["body"]}
 
 
 def _slack_values(draft):
@@ -60,11 +47,6 @@ def _slack_values(draft):
 # 행동 → 서버, 부를 수 있는 도구 이름 후보(앞에서부터, 모두 '보내기/만들기' 하나의 일만 하는 도구),
 #        값을 도구 입력 칸 이름에 맞추는 별칭. Slack은 도구·입력 칸 이름이 문서에 없어서 후보를 둔다.
 ACTIONS = {
-    "report_issue": {
-        "server": "github", "title": "답변 오류 신고(GitHub 이슈)", "values": _github_values,
-        "tools": ["issue_write", "create_issue"],
-        "aliases": {},
-    },
     "handoff": {
         "server": "slack", "title": "설계사에게 상담 요청(Slack)", "values": _slack_values,
         "tools": ["slack_send_message", "send_message", "chat_post_message", "post_message"],
@@ -162,7 +144,7 @@ def check(servers=None):
             report.append((name, f"실패: 보내기 도구를 못 찾음. 서버 도구 목록: {names}"))
             continue
         try:
-            _fit_args(action["values"]({"title": "t", "body": "b", "text": "t"}), action["aliases"],
+            _fit_args(action["values"]({"text": "t"}), action["aliases"],
                       set(getattr(tool, "args", {}) or {}))
         except (MCPError, ValueError) as e:
             report.append((name, f"실패: {e}"))
