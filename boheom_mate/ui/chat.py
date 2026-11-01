@@ -32,9 +32,7 @@ BASE_PROMPT = """당신은 '보험메이트', 실손의료보험 약관 상담 �
 - search_terms에는 앞 대화를 반영해 혼자 읽어도 뜻이 통하는 완전한 질문을 넣으세요.
   예: 앞에서 감기 통원 이야기를 했고 "대학병원이면요?"라고 물으면 → "감기로 대학병원에 통원했을 때 보상 내용과 공제금액"
 - 도구 결과가 found=false면 "약관에서 확인할 수 없다"고 말하세요.
-- 이 상품은 건강보험 되는 진료비(급여)는 보통약관에서, 건강보험 안 되는 진료비(비급여)는
-  특별약관1(중증)·2(비중증)에서 보상합니다. 검색 결과가 한쪽 조항만 보여 줘도 "한쪽만 된다"고 단정하지 마세요.
-
+{product_note}
 [금액 계산]
 - "얼마 받아요?" 같은 금액 질문은 calculate_payout 도구로만 계산하세요. 직접 계산하지 마세요.
 - 계산에 꼭 필요한 정보: 통원/입원, 병원 종류(동네 의원·병원 / 종합병원·대학병원), 낸 금액.
@@ -115,21 +113,94 @@ CALCULATE_TOOL = {
 }
 
 
+CALCULATE_SIMPLE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "calculate_payout",
+        "description": "영수증 금액으로 예상 실손 보험금을 계산한다(간편가입 약관 제3조 공식).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "care": {"type": "string", "enum": ["통원", "입원"]},
+                "covered_copay": {"type": "integer", "description": "급여 본인부담금(원). 없으면 0"},
+                "non_covered": {"type": "integer",
+                                "description": "비급여(원) 중 도수치료·주사·MRI·병실료를 뺀 나머지. 약값(처방조제비)은 넣지 않는다"},
+                "manual_therapy": {"type": "integer", "description": "비급여 도수치료·체외충격파·증식치료(원)"},
+                "injection": {"type": "integer",
+                              "description": "비급여 주사(원). 항암제·항생제·희귀의약품 주사는 non_covered에 넣는다"},
+                "mri": {"type": "integer", "description": "비급여 MRI/MRA(원)"},
+                "room_fee": {"type": "integer"},
+                "room_days": {"type": "integer"},
+                "visits": {"type": "integer", "description": "통원 방문 횟수. 모르면 1"},
+                "prior_deductible": {"type": "integer",
+                                     "description": "올해(계약해당일부터 1년) 이미 낸 입원 공제액. 사용자가 말했을 때만"},
+                "nhis_applied": {"type": "boolean",
+                                 "description": "국민건강보험을 적용받았는지. 적용받지 못했다고 말했을 때만 false"},
+                "hospital": {"type": "string", "enum": ["의원", "종합병원"],
+                             "description": "이 상품은 공제에 쓰지 않는다. 말했으면 넣는다"},
+                "generation": {"type": "string", "enum": ["1세대", "2세대", "3세대", "4세대"]},
+                "has_other_insurance": {"type": "boolean"},
+                "joined_year": {"type": "integer"},
+                "joined_month": {"type": "integer"},
+            },
+            "required": ["care"],
+        },
+    },
+}
+
+# 상품 구조 안내([약관 내용] 끝). 프로필을 모르면 넣지 않는다
+PRODUCT_NOTES = {
+    policy_rules.PROFILE_BASE: (
+        "- 이 상품은 건강보험 되는 진료비(급여)는 보통약관에서, 건강보험 안 되는 진료비(비급여)는\n"
+        "  특별약관1(중증)·2(비중증)에서 보상합니다. 검색 결과가 한쪽 조항만 보여 줘도 \"한쪽만 된다\"고 단정하지 마세요.\n"),
+    policy_rules.PROFILE_SIMPLE: (
+        "- 이 상품은 급여·비급여를 보통약관 한 담보에서 보상하고, "
+        "비급여 도수치료·주사·MRI는 보상하지 않습니다(제4조).\n"),
+}
+
+
+def _load_rules(source):
+    """계산에 쓸 수 있는(ok) Rule_Set(v2). 없거나 읽지 못하면 None."""
+    try:
+        return policy_rules.load(source)
+    except Exception:
+        return None
+
+
+def _profile(source, rules=None):
+    """상품 프로필(기본형/간편가입). 계산기가 꺼진 상품도 Rule_Set에 프로필이 있으면 돌려준다."""
+    if rules is not None:
+        return rules.get("profile")
+    try:
+        return policy_rules.load_rule_set(source).get("profile")
+    except Exception:
+        return None
+
+
+def product_note(profile):
+    """프로필에 맞는 상품 구조 한 줄. 프로필이 None(또는 모름)이면 빈 문자열."""
+    return PRODUCT_NOTES.get(profile, "")
+
+
 def calculator_available(source):
     """이 상품 약관에서 계산에 필요한 값을 모두 뽑고 원문으로 검증했으면 True."""
-    try:
-        return policy_rules.load(source) is not None
-    except Exception:
-        return False
+    return _load_rules(source) is not None
 
 
-def _system_prompt(source, can_calculate):
+def _calculate_tool(profile):
+    return CALCULATE_SIMPLE_TOOL if profile == policy_rules.PROFILE_SIMPLE else CALCULATE_TOOL
+
+
+def _system_prompt(source, can_calculate, profile=None):
+    if profile is None:
+        profile = _profile(source)
     if can_calculate:
         note = ""
     else:
         note = ("- 이 상품은 약관에서 계산에 필요한 값을 확인하지 못해 계산기를 쓸 수 없습니다. "
                 "금액 질문에는 약관 내용만 안내하세요.\n")
-    return BASE_PROMPT.format(calculator_note=note) + (PLAIN_RULES if PLAIN_LANGUAGE else "")
+    return (BASE_PROMPT.format(calculator_note=note, product_note=product_note(profile))
+            + (PLAIN_RULES if PLAIN_LANGUAGE else ""))
 
 
 def _model_history(history):
@@ -161,6 +232,8 @@ def _run_search(args, source, turn):
 def _run_calculate(args, source, turn):
     """계산 값은 이 상품 약관에서 뽑아 검증한 것을 쓰고, 계산에 쓴 약관 구절을 근거로 붙인다."""
     rules = policy_rules.load(source)
+    if rules is None:
+        raise ValueError("이 상품은 계산에 필요한 약관 값을 확인하지 못해 계산할 수 없습니다.")
     inputs = {k: v for k, v in args.items() if v is not None}
     # 가입 시기를 말했으면 세대는 GPT가 아니라 코드가 정한다(경계 연도에 월을 모르면 세대를 비워 둔다)
     year, month = inputs.pop("joined_year", None), inputs.pop("joined_month", None)
@@ -170,7 +243,11 @@ def _run_calculate(args, source, turn):
             inputs["generation"] = generation
         else:
             inputs.pop("generation", None)
-    result = calculator.calculate(**inputs, rules=rules["values"], articles=rules["articles"])
+    if rules.get("profile") == policy_rules.PROFILE_SIMPLE:
+        result = calculator.calculate_simple(**inputs, rules=rules["values"], articles=rules["articles"],
+                                             exclusion_quotes=rules.get("exclusion_items") or {})
+    else:
+        result = calculator.calculate(**inputs, rules=rules["values"], articles=rules["articles"])
     turn["calculation"] = {**result, "inputs": inputs}
     for e in policy_rules.evidence(rules, result["rules_used"]):
         if e not in turn["evidence"]:
@@ -185,10 +262,12 @@ def reply(history, source, memory=None):
     반환값: {"content": 답변, "evidence": [조항], "calculation": 계산 결과|None,
              "summary": 질문 요지|None, "searches": [GPT가 검색한 질문]}
     """
-    can_calculate = calculator_available(source)
-    tools = [SEARCH_TOOL] + ([CALCULATE_TOOL] if can_calculate else [])
+    rules = _load_rules(source)
+    can_calculate = rules is not None
+    profile = _profile(source, rules)
+    tools = [SEARCH_TOOL] + ([_calculate_tool(profile)] if can_calculate else [])
     llm = rag._llm.bind_tools(tools)
-    system = _system_prompt(source, can_calculate) + session_memory.prompt_block(memory)
+    system = _system_prompt(source, can_calculate, profile) + session_memory.prompt_block(memory)
     messages = [SystemMessage(content=system)] + _model_history(history)
     turn = {"evidence": [], "calculation": None, "summary": None, "searches": []}
 
